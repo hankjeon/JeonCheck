@@ -1,0 +1,86 @@
+<Window x:Class="JeonCheck.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="정보"
+        Icon="pack://application:,,,/Resources/app_icon.ico"
+        Width="495"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#1E1E1E"
+        Foreground="#E6EDF3"
+        FontFamily="Malgun Gothic"
+        FontSize="12.5">
+    <Border Padding="20,18,20,16" BorderBrush="#3E3E42" BorderThickness="1">
+        <StackPanel>
+            <!-- 상단: 아이콘 + 프로그램 제목 & 한 줄 설명 -->
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="64" Height="64" CornerRadius="12" Margin="0,0,14,0" ClipToBounds="True"
+                        BorderBrush="#30363D" BorderThickness="1">
+                    <Image Source="pack://application:,,,/Resources/app_icon.png"
+                           Stretch="UniformToFill"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="전검사" FontSize="20" FontWeight="Bold" Foreground="#58A6FF" />
+                        <TextBlock Text="JeonCheck" FontSize="14" FontWeight="SemiBold" Foreground="#9DA7B3" Margin="8,5,0,0" VerticalAlignment="Center" />
+                        <Border Background="#2D333B" CornerRadius="4" Padding="6,1" Margin="8,2,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="v1.0" FontSize="11" Foreground="#9DA7B3" FontWeight="SemiBold" />
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="C 언어 정적 분석 도구" FontSize="13.5" FontWeight="SemiBold" Foreground="#E6EDF3" Margin="0,4,0,0" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 중단: 주요 기능 (2줄) -->
+            <Border Background="#252526" BorderBrush="#333337" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="• Cppcheck + AST 기반 MISRA C 2012 및 암묵적 축소 형변환 검출"
+                               Foreground="#D0D7DE" Margin="0,0,0,5" TextWrapping="Wrap" />
+                    <TextBlock Text="• Clang-Tidy (CERT-C / bugprone) 통합 정밀 분석 및 #include 자동 매칭"
+                               Foreground="#D0D7DE" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- 하단: 제작 정보 (설계 / 개발 / 검증) -->
+            <Border Background="#18181A" BorderBrush="#30363D" BorderThickness="1" CornerRadius="6" Padding="12,9" Margin="0,0,0,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="설계 :" Foreground="#8B949E" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="hankjeon@gmail.com" Foreground="#E6EDF3" FontFamily="{StaticResource CodingFont}" Margin="0,0,0,4" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="개발 :" Foreground="#8B949E" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="argon@google" Foreground="#E6EDF3" FontFamily="{StaticResource CodingFont}" Margin="0,0,0,4" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="검증 :" Foreground="#8B949E" FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="claude@anthropic, codex@openai" Foreground="#E6EDF3" FontFamily="{StaticResource CodingFont}" />
+                </Grid>
+            </Border>
+
+            <!-- 닫기 버튼 -->
+            <Button Content="확인"
+                    Width="84"
+                    HorizontalAlignment="Right"
+                    IsDefault="True"
+                    IsCancel="True"
+                    Style="{StaticResource DarkButtonStyle}"
+                    Click="CloseButton_Click" />
+        </StackPanel>
+    </Border>
+</Window>

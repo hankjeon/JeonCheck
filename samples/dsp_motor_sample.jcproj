@@ -1,0 +1,22 @@
+{
+  "projectName": "TI_DSP_MotorControl_Sample",
+  "version": "1.0",
+  "savedAt": "2026-10-31T15:30:00+09:00",
+  "targetPresetId": "ti-c6678-eabi",
+  "cStandard": "c99",
+  "customDefines": "",
+  "forceAllIfdefConfigs": false,
+  "enableClangTidy": true,
+  "targetPaths": [
+    "src"
+  ],
+  "nonTargetPaths": [
+    "include",
+    "drivers"
+  ],
+  "excludedTargetPaths": [],
+  "excludedNonTargetPaths": [],
+  "enabledRuleIds": [],
+  "disabledRuleIds": [],
+  "suppressedIssues": []
+}
