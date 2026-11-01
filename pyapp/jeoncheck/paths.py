@@ -41,6 +41,19 @@ def samples_directory() -> Path:
     return root_directory() / "samples"
 
 
+def user_settings_path() -> Path:
+    """사용자별 설정 파일(최근 프로젝트 목록).
+
+    Windows는 WPF 앱과 같은 %LOCALAPPDATA%\\JeonCheck\\user_settings.json을 공유하고,
+    Linux는 $XDG_CONFIG_HOME(기본 ~/.config)/JeonCheck/user_settings.json을 사용한다.
+    """
+    if IS_WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "JeonCheck" / "user_settings.json"
+
+
 def platform_xml_path(xml_file_name: str) -> Path:
     return data_directory() / "targets" / xml_file_name
 

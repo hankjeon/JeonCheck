@@ -6,19 +6,21 @@ import os
 from html import escape
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton, QSplitter,
-                               QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
+                               QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser,
+                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..engine.process import AnalysisCancelled
+from ..missing_headers import group_missing_headers
 from ..models import AnalysisIssue, SourceTreeNode, SuppressedIssueEntry
 from ..paths import RESOURCES_DIR
 from ..state import C_STANDARDS, AnalysisRequest, AppState
 from . import theme
 from .code_view import CodeView
 from .dialogs import AboutDialog, RulesetDialog
+from .missing_header_dialog import MissingHeaderDialog
 
 OBJ_ROLE = Qt.ItemDataRole.UserRole + 1
 SORT_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         self._tree_signature: tuple = ()
         self.setWindowIcon(QIcon(str(RESOURCES_DIR / "app_icon.png")))
         self.resize(1600, 960)
+        self._build_menu()
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -144,6 +147,49 @@ class MainWindow(QMainWindow):
         b.clicked.connect(slot)
         return b
 
+    def _build_menu(self) -> None:
+        bar = self.menuBar()
+        file_menu = bar.addMenu("파일(&F)")
+        file_menu.addAction("📄 새 프로젝트(&N)", QKeySequence("Ctrl+N"), self.state.clear_workspace)
+        file_menu.addAction("📂 프로젝트 열기(&O)...", QKeySequence("Ctrl+O"), self._open_project)
+        self.recent_menu = file_menu.addMenu("🕒 최근 사용한 프로젝트(&R)")
+        self.recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
+        self._rebuild_recent_menu()
+        file_menu.addSeparator()
+        file_menu.addAction("💾 저장(&S)", QKeySequence("Ctrl+S"), self._save_project)
+        file_menu.addAction("💾 다른 이름으로 저장(&A)...", QKeySequence("Ctrl+Shift+S"), self._save_project_as)
+        file_menu.addSeparator()
+        file_menu.addAction("🧪 샘플 프로젝트 로드(&L)", self.state.load_sample_workspace)
+        file_menu.addSeparator()
+        file_menu.addAction("종료(&X)", self.close)
+        help_menu = bar.addMenu("도움말(&H)")
+        help_menu.addAction("ℹ️ 전검사 정보(&A)...", lambda: AboutDialog(self).exec())
+
+    def _rebuild_recent_menu(self) -> None:
+        menu = self.recent_menu
+        menu.clear()
+        recent = self.state.recent_projects
+        if not recent:
+            menu.addAction("(최근 사용한 프로젝트 없음)").setEnabled(False)
+            return
+        for i, full in enumerate(recent, start=1):
+            key = f"&{i}" if i <= 9 else "1&0"
+            action = menu.addAction(f"{key}. {os.path.basename(full)}  ({full})",
+                                    lambda p=full: self._open_recent_project(p))
+            action.setToolTip(full)
+        menu.addSeparator()
+        menu.addAction("🗑 최근 목록 비우기(&C)", self.state.clear_recent_projects)
+
+    def _open_recent_project(self, path: str) -> None:
+        if not os.path.isfile(path):
+            answer = QMessageBox.warning(
+                self, "파일 없음", f"프로젝트 파일을 찾을 수 없습니다:\n{path}\n\n최근 사용한 프로젝트 목록에서 제거할까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer == QMessageBox.StandardButton.Yes:
+                self.state.remove_recent_project(path)
+            return
+        self.state.load_project(path)
+
     def _build_toolbar(self) -> QWidget:
         bar = QFrame()
         bar.setObjectName("toolbar")
@@ -151,9 +197,6 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(8, 6, 8, 6)
 
         row1 = QHBoxLayout()
-        for text, slot in (("📄 새 프로젝트", self.state.clear_workspace), ("📂 열기", self._open_project),
-                           ("💾 저장", self._save_project), ("🧪 샘플 로드", self.state.load_sample_workspace)):
-            row1.addWidget(self._button(text, slot))
         row1.addStretch(1)
         self.ruleset_button = self._button("", self._open_ruleset)
         self.cancel_button = self._button("■ 분석 취소", self.state.cancel_analysis, "danger")
@@ -161,7 +204,6 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.ruleset_button)
         row1.addWidget(self.cancel_button)
         row1.addWidget(self.analyze_button)
-        row1.addWidget(self._button("ℹ️ 정보", lambda: AboutDialog(self).exec()))
         v.addLayout(row1)
 
         row2 = QHBoxLayout()
@@ -324,6 +366,8 @@ class MainWindow(QMainWindow):
         for col, w in enumerate((200, 150, 50)):
             self.notes_table.setColumnWidth(col, w)
         self.notes_table.currentCellChanged.connect(self._note_selected)
+        self.notes_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.notes_table.customContextMenuRequested.connect(self._notes_menu)
         self.tabs.addTab(self.notes_table, "")
 
         # 4. 예외 항목
@@ -574,8 +618,16 @@ class MainWindow(QMainWindow):
             self.state.load_project(path)
 
     def _save_project(self) -> None:
+        # 이미 저장된 프로젝트는 같은 파일에 바로 덮어쓰고, 처음 저장할 때만 파일 이름을 묻는다.
+        if self.state.current_project_file_path:
+            self.state.save_project(self.state.current_project_file_path)
+        else:
+            self._save_project_as()
+
+    def _save_project_as(self) -> None:
         start = self.state.current_project_file_path or "embedded_analysis.jcproj"
-        path, _ = QFileDialog.getSaveFileName(self, "전검사 프로젝트 파일 저장", start, "전검사 프로젝트 (*.jcproj)")
+        path, _ = QFileDialog.getSaveFileName(self, "전검사 프로젝트 다른 이름으로 저장", start,
+                                              "전검사 프로젝트 (*.jcproj)")
         if path:
             if not path.endswith(".jcproj"):
                 path += ".jcproj"
@@ -683,6 +735,39 @@ class MainWindow(QMainWindow):
         note = item.data(OBJ_ROLE) if item else None
         if note is not None and note.file_path:
             self._navigate(note.file_path, note.line)
+
+    def _notes_menu(self, pos) -> None:
+        menu = QMenu(self)
+        menu.addAction("🔍 모든 누락 헤더를 폴더에서 일괄 검색하여 참조 코드에 추가...",
+                       lambda: self._search_missing_headers(only_selected=False))
+        menu.addAction("🔍 선택한 줄의 누락 헤더만 폴더에서 검색하여 참조 코드에 추가...",
+                       lambda: self._search_missing_headers(only_selected=True))
+        menu.exec(self.notes_table.viewport().mapToGlobal(pos))
+
+    def _search_missing_headers(self, only_selected: bool) -> None:
+        notes = self.state.notes
+        items = []
+        if only_selected:
+            cell = self.notes_table.item(self.notes_table.currentRow(), 0)
+            selected = cell.data(OBJ_ROLE) if cell else None
+            items = group_missing_headers([selected] if selected is not None else [])
+        # 선택한 행이 누락 헤더 노트가 아니면 전체 누락 헤더로 대신 검색
+        if not items:
+            items = group_missing_headers(notes)
+        if not items:
+            QMessageBox.information(self, "누락 헤더 없음",
+                                    "현재 노트 목록에 누락된 포함 파일(#include) 안내가 없습니다.\n"
+                                    "정적 분석 실행 후 누락된 헤더가 있을 때 사용할 수 있습니다.")
+            return
+        folder = QFileDialog.getExistingDirectory(self, f"누락된 헤더({len(items)}종)를 하위까지 탐색할 상위 폴더 선택")
+        if not folder or not os.path.isdir(folder):
+            return
+        dialog = MissingHeaderDialog(items, folder, self)
+        if dialog.exec() and dialog.selected_paths:
+            for p in dialog.selected_paths:
+                self.state.add_non_target_path(p)
+            self.state.set_status(f"참조코드(비대상)에 헤더 파일 {len(dialog.selected_paths)}개를 추가했습니다. "
+                                  "상단 [▶ 정적 분석 시작]을 다시 실행하면 누락 헤더가 반영됩니다.")
 
     def _current_suppressed(self) -> SuppressedIssueEntry | None:
         item = self.suppressed_table.item(self.suppressed_table.currentRow(), 0)

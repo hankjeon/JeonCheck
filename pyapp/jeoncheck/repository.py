@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from . import paths
-from .models import RuleInfo, SuppressedIssueEntry, TargetPreset
+from .models import RuleInfo, SuppressedIssueEntry, TargetPreset, normalize_path
+
+MAX_RECENT_PROJECTS = 10
 
 
 def load_target_presets() -> list[TargetPreset]:
@@ -25,6 +27,41 @@ def load_rules() -> list[RuleInfo]:
         return []
     data = json.loads(p.read_text(encoding="utf-8-sig"))
     return [RuleInfo.from_json(r) for r in data.get("rules", [])]
+
+
+def _unique_recent(recent_paths) -> list[str]:
+    result, seen = [], set()
+    for p in recent_paths:
+        if not p or not str(p).strip():
+            continue
+        full = os.path.abspath(p)
+        key = normalize_path(full)
+        if key not in seen:
+            seen.add(key)
+            result.append(full)
+    return result[:MAX_RECENT_PROJECTS]
+
+
+def load_recent_projects() -> list[str]:
+    """최근 사용한 프로젝트 목록. 파일이 없거나 형식이 잘못되었으면 빈 목록."""
+    try:
+        d = json.loads(paths.user_settings_path().read_text(encoding="utf-8-sig"))
+        # WPF 앱은 "RecentProjects"로 쓰고 대소문자 무시로 읽으므로 같은 방식으로 찾는다.
+        recent = next((v for k, v in d.items() if k.lower() == "recentprojects"), None)
+        return _unique_recent(recent) if isinstance(recent, list) else []
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def save_recent_projects(recent_paths) -> None:
+    """최근 사용한 프로젝트 목록 저장. 사용자 설정 폴더에 쓸 수 없으면 무시한다."""
+    try:
+        p = paths.user_settings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"RecentProjects": _unique_recent(recent_paths)}, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 @dataclass

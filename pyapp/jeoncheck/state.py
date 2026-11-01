@@ -1,7 +1,7 @@
 """화면 상태와 동작 로직 (WPF 앱 MainViewModel의 Qt 비의존 포팅).
 
 UI는 `listeners`에 콜백을 등록해 변경 알림(이벤트 이름)을 받고, 필요한 부분을 다시 그린다.
-이벤트: "status", "options", "trees", "results", "code", "rules", "project", "selection", "analyzing"
+이벤트: "status", "options", "trees", "results", "code", "rules", "project", "selection", "analyzing", "recent"
 """
 
 from __future__ import annotations
@@ -79,6 +79,7 @@ class AnalysisRequest:
 
 class AppState:
     def __init__(self, load_sample: bool = True):
+        """load_sample=True이면 시작 시 마지막 프로젝트를 자동으로 열고, 없으면 내장 샘플을 로드한다."""
         self.listeners: list[Callable[[str], None]] = []
 
         self.target_presets: list[TargetPreset] = []
@@ -111,6 +112,7 @@ class AppState:
         self.selected_issue: AnalysisIssue | None = None
 
         self.current_project_file_path = ""
+        self.recent_projects: list[str] = []
         self.status_message = "준비 완료"
         self._analysis: AnalysisRequest | None = None
 
@@ -186,8 +188,16 @@ class AppState:
             errors.append(f"규칙 DB(rules_ko.json) 읽기 실패: {ex}")
         for r in rules:
             self._add_rule(r)
-        if load_sample and paths.samples_directory().is_dir():
-            self.load_sample_workspace()
+        self.recent_projects = repository.load_recent_projects()
+        if load_sample:
+            # 마지막에 사용하던 프로젝트가 있으면 자동으로 불러오고, 없으면 초기 샘플 프로젝트를 로드
+            last = next((p for p in self.recent_projects if os.path.isfile(p)), None)
+            if last:
+                self.load_project(last)
+                if self.current_project_file_path:
+                    self.set_status(f"최근 프로젝트 자동 불러오기 완료: {last}")
+            if not self.current_project_file_path and paths.samples_directory().is_dir():
+                self.load_sample_workspace()
         if errors:
             self.set_status("데이터 파일 오류: " + " / ".join(errors))
 
@@ -639,9 +649,10 @@ class AppState:
         except OSError as ex:
             self.set_status(f"프로젝트 저장 실패: {ex}")
             return
-        self.current_project_file_path = file_path
+        self.current_project_file_path = os.path.abspath(file_path)
+        self.add_recent_project(self.current_project_file_path)
         self.notify("project")
-        self.set_status(f"프로젝트 저장 완료: {file_path}")
+        self.set_status(f"프로젝트 저장 완료: {self.current_project_file_path}")
 
     def load_project(self, file_path: str) -> None:
         try:
@@ -654,7 +665,8 @@ class AppState:
             return
 
         self.clear_workspace()
-        self.current_project_file_path = file_path
+        self.current_project_file_path = os.path.abspath(file_path)
+        self.add_recent_project(self.current_project_file_path)
         self.selected_preset = next((t for t in self.target_presets if t.id == model.target_preset_id),
                                     self.target_presets[0] if self.target_presets else None)
         self.c_standard = model.c_standard
@@ -694,6 +706,29 @@ class AppState:
             self.load_file_into_code_viewer(first.full_path)
         self.notify("trees", "results", "rules", "project", "options")
         self.set_status(f"프로젝트 불러오기 완료: {file_path}")
+
+    # ---------------------------------------------------------------- 최근 사용한 프로젝트
+    def add_recent_project(self, file_path: str) -> None:
+        if not file_path or not file_path.strip():
+            return
+        full = os.path.abspath(file_path)
+        key = normalize_path(full)
+        self.recent_projects = [full] + [p for p in self.recent_projects if normalize_path(p) != key]
+        del self.recent_projects[repository.MAX_RECENT_PROJECTS:]
+        repository.save_recent_projects(self.recent_projects)
+        self.notify("recent")
+
+    def remove_recent_project(self, file_path: str) -> None:
+        key = normalize_path(file_path)
+        self.recent_projects = [p for p in self.recent_projects if normalize_path(p) != key]
+        repository.save_recent_projects(self.recent_projects)
+        self.notify("recent")
+
+    def clear_recent_projects(self) -> None:
+        self.recent_projects = []
+        repository.save_recent_projects(self.recent_projects)
+        self.notify("recent")
+        self.set_status("최근 사용한 프로젝트 목록을 비웠습니다.")
 
     # ---------------------------------------------------------------- 외부 도구
     def open_current_file_in_external_editor(self, line: int = 1) -> None:
