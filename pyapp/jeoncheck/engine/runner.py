@@ -495,8 +495,27 @@ def parse_cppcheck_xml(xml_text: str, target_norm: set[str], rules_by_id: dict[s
                 result.notes.append(create_note(eid, title, msg, full, line, col))
             continue
 
-        # 2) 검사 대상 파일에 속하지 않은 결함은 제외
+        # 2) 검사 대상 파일에 속하지 않은 결함은 제외하되, 비대상(참조) 헤더의 #error나 구문 오류는
+        #    이를 포함한 검사 대상 파일 전체를 [미검사]로 만들므로 원인을 노트로 안내 (WPF 앱과 같은 규칙)
         if not file or normalize_path(full) not in target_norm:
+            if eid.lower() in ("preprocessorerrordirective", "syntaxerror", "internalasterror"):
+                note_key = f"{eid}|{normalize_path(full)}|{line}|{raw_msg}"
+                if note_key not in keys.notes:
+                    keys.notes.add(note_key)
+                    name = os.path.basename(file)
+                    if eid.lower() == "preprocessorerrordirective":
+                        title = "참조 헤더 전처리기 #error 발생 (분석 중단 원인)"
+                        msg = (f"[전처리기 #error 중단 안내] 참조 헤더 '{name}' ({line}번째 줄)에서 '{raw_msg}' 오류가 발생하여 "
+                               "이를 포함한 소스 파일이 미검사 처리되었습니다. 타겟 프로세서 설정이 해당 헤더의 아키텍처와 맞는지 "
+                               "확인하거나 상단 [-D 매크로]에 필요한 매크로를 추가하세요.")
+                    else:
+                        title = "참조 헤더 구문 해석 오류 (분석 중단 원인)"
+                        msg = (f"[참조 헤더 구문 오류 안내] 참조 헤더 '{name}' ({line}번째 줄)에서 구문 오류({raw_msg})가 발생하여 "
+                               "이를 포함한 소스 파일 분석이 중단되었습니다. 컴파일러 전용 비표준 키워드나 매크로를 "
+                               "상단 [-D 매크로]에 정의하세요.")
+                    note = create_note(eid, title, msg, full, line, col)
+                    note.severity = "Error"
+                    result.notes.append(note)
             continue
 
         # 2-1) 초기화되지 않은 값 사용은 MISRA 9.1로도 보고 (9.1 규칙의 ON/OFF를 따름)

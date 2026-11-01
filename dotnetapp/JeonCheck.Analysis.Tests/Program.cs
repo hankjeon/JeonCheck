@@ -63,6 +63,21 @@ foreach (var (target, value, expected) in new[] { ("unsigned", "1", 0), ("unsign
         f.Expect("implicitSignConversion", expected);
     });
 
+Test("sizeof 값은 Cppcheck 확정 값으로 상수 판정", () =>
+{
+    // c = sizeof(int): 값이 대상 타입에 들어가면 축소 변환이 아니다
+    var f = new Fixture();
+    var lhs = f.Value("c", "char");
+    var paren = f.Token("("); paren.ValueType = "long"; paren.ValueSign = "unsigned"; paren.KnownIntValue = 4;
+    paren.AstOperand1 = f.Token("sizeof"); paren.AstOperand2 = f.Token("int");
+    f.Binary("=", lhs, paren).IsAssignmentOp = true;
+    f.Expect("implicitNarrowing", 0);
+    paren.KnownIntValue = 300;
+    f.Expect("implicitNarrowing", 1);
+    paren.KnownIntValue = null; // 값을 모르면 상수로 보지 않는다
+    f.Expect("implicitNarrowing", 1);
+});
+
 Test("규칙 비활성화 시 자체 검사 미보고", () =>
 {
     var f = new Fixture();

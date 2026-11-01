@@ -1,6 +1,6 @@
 """Cppcheck dump 해석 하위 프로세스: 줄별 검사 커버리지와 자체 검사 4종을 JSON으로 출력한다.
 
-설치된 Cppcheck와 같은 버전의 addon(cppcheckdata.py, misra.py)을 import하여 사용한다.
+설치된 Cppcheck와 같은 버전의 addon(cppcheckdata.py)을 import하여 dump를 읽는다.
 MISRA 규칙 자체는 misra.py를 별도로 실행하여 검사하며, 이 모듈은 misra.py에 없는 다음 검사만 수행한다.
 
 - implicitNarrowing: 대입·반환·인자 전달 시 비트 폭이 줄어드는 암묵적 변환(정수 축소, double→float, 실수→정수)
@@ -8,8 +8,8 @@ MISRA 규칙 자체는 misra.py를 별도로 실행하여 검사하며, 이 모�
 - explicitNarrowingCast: 더 작은 수치 타입으로의 명시적 캐스트
 - pointerSizeMismatch: 포인터를 포인터보다 작은 정수형으로 캐스트
 
-필수 타입은 misra.py의 getEssentialType()을 사용하고, misra.py가 판정하지 않는 함수 호출 결과·배열 요소·
-구조체 멤버·역참조·대입식은 토큰의 값 타입으로 보완한다(WPF 앱 EssentialTypeResolver와 같은 범위).
+두 앱이 같은 결과를 내도록 필수 타입·상수 계산은 WPF 앱의 EssentialTypeResolver를,
+검사 흐름은 TypeConversionAnalyzer를 그대로 옮겼다. sizeof(...) 값은 Cppcheck 값 흐름의 확정 값을 쓴다.
 
 사용법: python3 dump_worker.py <dump 파일> --addon-dir <addon 폴더> --targets <대상 경로 JSON 파일> --base-dir <cppcheck 작업 폴더>
 """
@@ -26,6 +26,7 @@ from collections import defaultdict
 INTEGER_TYPES = ("char", "short", "int", "long", "long long")
 FLOAT_TYPES = ("float", "double", "long double")
 SKIP_CALL_NAMES = {"if", "for", "while", "switch", "sizeof", "return"}
+LONG_MIN, LONG_MAX = -(1 << 63), (1 << 63) - 1
 
 
 def normalize_path(path: str) -> str:
@@ -86,8 +87,7 @@ class EssentialType:
 
 
 class Checker:
-    def __init__(self, misra, platform: Platform, targets: set[str], base_dir: str):
-        self.misra = misra
+    def __init__(self, platform: Platform, targets: set[str], base_dir: str):
         self.platform = platform
         self.targets = targets
         self.base_dir = base_dir
@@ -117,79 +117,131 @@ class Checker:
     def vt(tok):
         return getattr(tok, "valueType", None) if tok is not None else None
 
-    def pointer_of(self, tok) -> int:
-        v = self.vt(tok)
+    # ---- WPF 앱 EssentialTypeResolver 이식 (두 앱의 자체 검사 결과를 같게 유지) ----
+    @staticmethod
+    def pointer_of(tok) -> int:
+        v = Checker.vt(tok)
         return v.pointer if v else 0
 
-    def from_str(self, s: str | None) -> EssentialType | None:
-        if not s:
-            return None
-        if s == "bool":
-            return EssentialType("bool", 1, "bool")
-        if s == "char":
-            return EssentialType("char", self.platform.bits["char"], "char")
-        if s in FLOAT_TYPES:
-            return EssentialType("float", self.platform.bits[s], s)
-        for sign in ("signed", "unsigned"):
-            if s.startswith(sign + " "):
-                bits = self.platform.bits.get(s[len(sign) + 1:], 0)
-                return EssentialType(sign, bits, s) if bits > 0 else None
-        return None
-
-    def from_value_type(self, tok, plain_char: bool = False) -> EssentialType | None:
-        v = self.vt(tok)
-        if v is None or v.pointer > 0 or not v.type:
-            return None
-        if v.type == "bool":
-            return EssentialType("bool", 1, "bool")
-        if v.type in FLOAT_TYPES:
-            return EssentialType("float", self.platform.bits[v.type], v.type)
-        if v.type not in INTEGER_TYPES:
-            return None
-        bits = self.platform.bits[v.type]
-        if v.type == "char" and (plain_char or not v.sign):
-            return EssentialType("char", bits, "char")
-        sign = "unsigned" if v.sign == "unsigned" else "signed"
-        return EssentialType(sign, bits, f"{sign} {v.type}")
+    @staticmethod
+    def vtype(tok):
+        v = Checker.vt(tok)
+        return v.type if v else None
 
     @staticmethod
-    def is_plain_char(type_tok) -> bool:
-        t = type_tok
-        while t is not None and t.isName:
-            if t.str == "char" and not t.isSigned and not t.isUnsigned:
-                return True
-            t = t.next
-        return False
+    def vsign(tok):
+        v = Checker.vt(tok)
+        return v.sign if v else None
 
-    def from_value(self, value: int, is_signed: bool) -> EssentialType | None:
-        s = self.misra.get_essential_type_from_value(value, is_signed)
-        return self.from_str(s)
+    @staticmethod
+    def is_integer_value_type(tok) -> bool:
+        return Checker.pointer_of(tok) == 0 and Checker.vtype(tok) in INTEGER_TYPES
 
     def resolve(self, expr) -> EssentialType | None:
         if expr is None or self.pointer_of(expr) > 0:
             return None
-        try:
-            et = self.from_str(self.misra.getEssentialType(expr))
-        except Exception:  # misra.py가 처리하지 못하는 AST는 아래 보완 규칙만 적용
-            et = None
-        if et is not None:
-            return et
         s = expr.str
-        if s == ",":
-            return self.resolve(expr.astOperand2)
-        if s == "?":
-            return self.resolve(expr.astOperand2)
-        if s in ("-", "+") and expr.astOperand2 is None and expr.astOperand1 is not None:
-            v = self.vt(expr)
-            value = expr.getKnownIntValue()
-            if v and v.type in INTEGER_TYPES and value is not None:
-                return self.from_value(value, v.sign != "unsigned")
+        # 부록 D.6: 문자 상수('a', '\n')는 문자형
+        if self.is_char_literal(s):
+            return EssentialType("char", self.platform.bits["char"], "char")
+        # 부록 D.6: 정수 상수는 값을 표현할 수 있는 가장 작은 타입 (int 이외의 접미사 타입은 그대로)
+        if getattr(expr, "isInt", False):
+            if self.vtype(expr) == "int":
+                ok, literal = self.try_eval_const_int(expr)
+                if ok:
+                    return self.from_value(literal, self.vsign(expr) != "unsigned") or self.from_value_type(expr)
+            return self.from_value_type(expr)
+        if getattr(expr, "isFloat", False):
+            return self.from_value_type(expr)
+        # 변수: 선언된 타입 (typedef 해제 후 'char' 토큰에 signed/unsigned가 없으면 일반 문자형)
+        if expr.variable is not None:
+            return self.from_value_type(expr, self.is_plain_char(expr.variable.typeStartToken))
+        # 캐스트: 캐스트 대상 타입
+        if getattr(expr, "isCast", False):
+            return self.from_value_type(expr, self.is_plain_char_cast(expr.next))
+
+        if s in ("<", "<=", ">", ">=", "==", "!=", "&&", "||", "!"):
+            return EssentialType("bool", 1, "bool")
+        if s in (",", "?"):
+            return self.resolve(expr.astOperand2)  # '?'의 astOperand2는 ':' 토큰
+        if s == "~" and expr.astOperand2 is None:
             return self.resolve(expr.astOperand1)
-        is_call = s == "(" and not getattr(expr, "isCast", False) and expr.astOperand1 is not None \
-            and expr.astOperand1.isName
+        if s in ("-", "+") and expr.astOperand2 is None and expr.astOperand1 is not None:
+            if self.is_integer_value_type(expr):
+                ok, unary = self.try_eval_const_int(expr)
+                if ok:
+                    return self.from_value(unary, self.vsign(expr) != "unsigned")
+            return self.resolve(expr.astOperand1)
+
+        # 이항 산술/비트/시프트 연산 및 조건 연산자의 ':'
+        if expr.astOperand1 is not None and expr.astOperand2 is not None and \
+                s in ("+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", ":"):
+            if self.pointer_of(expr.astOperand1) > 0 or self.pointer_of(expr.astOperand2) > 0:
+                return None
+            e1 = self.resolve(expr.astOperand1)
+            e2 = self.resolve(expr.astOperand2)
+            if e1 is None or e2 is None:
+                return None
+            # 시프트 연산의 필수 타입은 좌변 피연산자의 필수 타입
+            if s in ("<<", ">>"):
+                if self.is_integer_value_type(expr) and e1.is_signed_or_unsigned:
+                    ok, shift_val = self.try_eval_const_int(expr)
+                    if ok:
+                        by_shift = self.from_value(shift_val, e1.category == "signed")
+                        if by_shift is not None:
+                            return by_shift
+                return e1
+            # 양쪽 피연산자의 부호 범주가 같을 때만 정수 상수 수식을 값 기반 최소 타입으로 축소
+            if s != ":" and e1.category == e2.category and e1.is_signed_or_unsigned and \
+                    self.is_integer_value_type(expr):
+                ok, const_value = self.try_eval_const_int(expr)
+                if ok:
+                    by_value = self.from_value(const_value, e1.category == "signed")
+                    if by_value is not None:
+                        return by_value
+            if e1.bits != e2.bits:
+                return e2 if e2.bits > e1.bits else e1
+            # 비트 폭이 같고 한쪽이 Unsigned이면 C 표준 산술 변환과 동일하게 Unsigned 우선
+            return e1 if e1.category == "unsigned" else e2
+
+        # 함수 호출 결과(반환형), 배열 요소, 구조체 멤버, 포인터 역참조, 대입식
+        is_call = s == "(" and expr.astOperand1 is not None and expr.astOperand1.type == "name"
         is_deref = s == "*" and expr.astOperand2 is None
         if is_call or is_deref or s in ("[", ".") or expr.isAssignmentOp:
-            return self.from_value_type(expr)
+            return self.from_value_type(expr, self.is_plain_char_expr(expr))
+        # 열거형 상수 등 판정 불가 항목은 오탐 방지를 위해 None
+        return None
+
+    def from_value_type(self, tok, plain_char: bool = False) -> EssentialType | None:
+        """토큰의 값 타입을 그대로 필수 타입으로 변환 (함수 반환형 등 승격이 없는 위치에 사용)."""
+        vtype, sign = self.vtype(tok), self.vsign(tok)
+        if self.pointer_of(tok) > 0 or not vtype:
+            return None
+        if vtype == "bool":
+            return EssentialType("bool", 1, "bool")
+        if vtype in FLOAT_TYPES:
+            return EssentialType("float", self.platform.bit_width(vtype, 0), vtype)
+        if vtype not in INTEGER_TYPES:
+            return None
+        bits = self.platform.bit_width(vtype, 0)
+        if bits <= 0:
+            return None
+        if vtype == "char" and (plain_char or not sign):
+            return EssentialType("char", bits, "char")
+        signness = "unsigned" if sign == "unsigned" else "signed"
+        return EssentialType(signness, bits, f"{signness} {vtype}")
+
+    def from_value(self, value: int, is_signed: bool) -> EssentialType | None:
+        """정수 상수 값을 표현할 수 있는 가장 작은 정수 타입."""
+        if not is_signed and value < 0:
+            return None
+        for type_name in INTEGER_TYPES:
+            bits = self.platform.bit_width(type_name, 0)
+            if bits <= 0:
+                continue
+            if self.fits_in_bits(value, bits, not is_signed):
+                signness = "signed" if is_signed else "unsigned"
+                return EssentialType(signness, bits, f"{signness} {type_name}")
         return None
 
     @staticmethod
@@ -200,13 +252,159 @@ class Checker:
             return 0 <= value <= (1 << bits) - 1
         return -(1 << (bits - 1)) <= value <= (1 << (bits - 1)) - 1
 
+    @staticmethod
+    def _checked(value: int) -> tuple[bool, int]:
+        """C# checked long 연산과 같이 범위를 넘으면 계산 실패로 본다."""
+        return (True, value) if LONG_MIN <= value <= LONG_MAX else (False, 0)
+
+    def try_eval_const_int(self, tok) -> tuple[bool, int]:
+        """정수 리터럴로만 이루어진 상수 수식의 값 (매크로 상수 확장 결과 포함). 계산 불가하면 (False, 0)."""
+        if tok is None or self.pointer_of(tok) > 0:
+            return False, 0
+        # sizeof(...)는 Cppcheck가 대상 플랫폼 기준으로 계산한 값(값 흐름)을 쓴다
+        if tok.str == "(" and tok.astOperand1 is not None and tok.astOperand1.str == "sizeof":
+            size = tok.getKnownIntValue()
+            return (True, size) if size is not None else (False, 0)
+        if getattr(tok, "isInt", False):
+            return self.try_parse_int_literal(tok.str)
+        if getattr(tok, "isCast", False) or tok.variable is not None:
+            return False, 0
+        if tok.astOperand1 is not None and tok.astOperand2 is None:
+            ok, v1 = self.try_eval_const_int(tok.astOperand1)
+            if not ok:
+                return False, 0
+            if tok.str == "-":
+                return self._checked(-v1)
+            if tok.str == "+":
+                return True, v1
+            return False, 0
+        if tok.astOperand1 is None or tok.astOperand2 is None:
+            return False, 0
+        ok, a = self.try_eval_const_int(tok.astOperand1)
+        if not ok:
+            return False, 0
+        ok, b = self.try_eval_const_int(tok.astOperand2)
+        if not ok:
+            return False, 0
+        op = tok.str
+        if op == "+":
+            return self._checked(a + b)
+        if op == "-":
+            return self._checked(a - b)
+        if op == "*":
+            return self._checked(a * b)
+        if op in ("/", "%"):
+            if b == 0:
+                return False, 0
+            q = abs(a) // abs(b) * (1 if (a >= 0) == (b >= 0) else -1)  # C#처럼 0 방향으로 자른다
+            return self._checked(q) if op == "/" else self._checked(a - b * q)
+        if op == "&":
+            return True, a & b
+        if op == "|":
+            return True, a | b
+        if op == "^":
+            return True, a ^ b
+        if op == "<<":
+            if b < 0 or b > 62 or a < 0 or a > (LONG_MAX >> b):
+                return False, 0
+            return True, a << b
+        if op == ">>":
+            if b < 0 or b > 63:
+                return False, 0
+            return True, a >> b
+        return False, 0
+
+    @staticmethod
+    def try_parse_int_literal(raw: str) -> tuple[bool, int]:
+        if not raw or not raw.strip():
+            return False, 0
+        s = raw.strip().rstrip("uUlL")
+        negative = s.startswith("-")
+        if negative:
+            s = s[1:]
+        if s[:2].lower() == "0x":
+            digits = s[2:]
+            if not digits or any(c not in "0123456789abcdefABCDEF" for c in digits):
+                return False, 0
+            value = int(digits, 16)
+        elif len(s) > 1 and s[0] == "0" and all(c in "01234567" for c in s):
+            value = int(s, 8)
+        else:
+            if not s or any(c not in "0123456789" for c in s):
+                return False, 0
+            value = int(s)
+        if value > LONG_MAX:
+            return False, 0
+        return True, -value if negative else value
+
     def constant_fits(self, tok, bits: int, unsigned: bool) -> bool:
-        value = tok.getKnownIntValue()
-        return value is not None and self.fits_in_bits(value, bits, unsigned)
+        ok, value = self.try_eval_const_int(tok)
+        return ok and self.fits_in_bits(value, bits, unsigned)
 
     def non_negative_constant(self, tok) -> bool:
-        value = tok.getKnownIntValue()
-        return value is not None and value >= 0
+        ok, value = self.try_eval_const_int(tok)
+        return ok and value >= 0
+
+    @staticmethod
+    def is_char_literal(s: str) -> bool:
+        return len(s) >= 3 and s[0] == "'" and s[-1] == "'" and (len(s) == 3 or (len(s) == 4 and s[1] == "\\"))
+
+    @staticmethod
+    def is_plain_char(type_tok) -> bool:
+        """타입 선언 토큰열에서 signed/unsigned가 명시되지 않은 일반 'char'인지 확인."""
+        t = type_tok
+        while t is not None and t.type == "name":
+            if t.str == "char":
+                return not t.isSigned and not t.isUnsigned
+            t = t.next
+        return False
+
+    @staticmethod
+    def is_plain_char_cast(cast_tok) -> bool:
+        t = cast_tok
+        while t is not None and (t.type == "name" or t.str == "*"):
+            if t.str == "char":
+                return not t.isSigned and not t.isUnsigned
+            t = t.next
+        return False
+
+    @staticmethod
+    def is_plain_char_expr(expr) -> bool:
+        """'[', 역참조 '*', '.', 대입식을 풀어 기저 변수의 선언 타입이 일반 'char'인지 확인."""
+        vartok = expr
+        while vartok is not None:
+            if vartok.str == "[" or (vartok.str == "*" and vartok.astOperand2 is None):
+                vartok = vartok.astOperand1
+            elif vartok.str == ".":
+                vartok = vartok.astOperand2
+            elif vartok.isAssignmentOp:
+                vartok = vartok.astOperand1
+            else:
+                break
+        if vartok is not None and vartok.variable is not None:
+            return Checker.is_plain_char(vartok.variable.typeStartToken)
+        return False
+
+    def resolve_parameter(self, param) -> EssentialType | None:
+        """함수 매개변수의 필수 타입. 이름 없는 프로토타입 매개변수(예: f(int16_t))는 단일 타입 토큰으로 판정한다."""
+        if param.nameToken is not None:
+            return self.from_value_type(param.nameToken, self.is_plain_char(param.typeStartToken))
+        type_tok = param.typeStartToken
+        if type_tok is None or (param.typeStartTokenId or "") != (param.typeEndTokenId or ""):
+            return None
+        if type_tok.next is None or type_tok.next.str not in (",", ")"):
+            return None  # 포인터('*') 등 추가 선언자가 있는 경우
+        name = type_tok.str
+        if name in ("bool", "_Bool"):
+            return EssentialType("bool", 1, "bool")
+        if name in ("float", "double"):
+            return EssentialType("float", self.platform.bit_width(name, 0), name)
+        if name == "char" and not type_tok.isSigned and not type_tok.isUnsigned:
+            return EssentialType("char", self.platform.bits["char"], "char")
+        if name in ("char", "short", "int"):
+            signness = "unsigned" if type_tok.isUnsigned else "signed"
+            return EssentialType(signness, self.platform.bit_width(name, 0), f"{signness} {name}")
+        return None
 
     def type_display(self, tok) -> str:
         v = self.vt(tok)
@@ -285,14 +483,14 @@ class Checker:
         func = getattr(func_tok, "function", None)
         if name in SKIP_CALL_NAMES or func is None or paren.astOperand2 is None:
             return
-        params = getattr(func, "argument", None) or {}
+        argument = getattr(func, "argument", None) or {}
+        params = [argument[nr] for nr in sorted(argument)]  # 매개변수 번호 순서
         args = self.flatten_args(paren.astOperand2)
         # 가변 인자(...) 부분은 검사하지 않음
-        for i, arg in enumerate(args, start=1):
-            param = params.get(i)
-            if param is None or param.nameToken is None:
+        for i, (arg, param) in enumerate(zip(args, params), start=1):
+            if param is None:
                 continue
-            pt = self.from_value_type(param.nameToken, self.is_plain_char(param.typeStartToken))
+            pt = self.resolve_parameter(param)
             at = self.resolve(arg)
             if pt is None or at is None:
                 continue
@@ -384,20 +582,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sys.path.insert(0, args.addon_dir)
     import cppcheckdata  # noqa: E402  (설치된 Cppcheck addon)
-    import misra  # noqa: E402
 
     with open(args.targets, encoding="utf-8") as f:
         targets = {normalize_path(p) for p in json.load(f)}
 
     data = cppcheckdata.CppcheckData(args.dump)
     platform = Platform(args.dump)
-    # misra.py가 parseDump에서 하는 것처럼 플랫폼 비트 폭을 설정해야 getEssentialType이 올바르게 동작한다.
-    p = data.platform
-    if p is not None:
-        misra.typeBits.update({"CHAR": p.char_bit, "SHORT": p.short_bit, "INT": p.int_bit,
-                               "LONG": p.long_bit, "LONG_LONG": p.long_long_bit, "POINTER": p.pointer_bit})
-
-    checker = Checker(misra, platform, targets, args.base_dir)
+    checker = Checker(platform, targets, args.base_dir)
     configurations = list(data.iterconfigurations())
     for cfg in configurations:
         checker.check_configuration(cfg)

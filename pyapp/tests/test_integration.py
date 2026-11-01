@@ -69,6 +69,22 @@ def test_sample_analysis_with_clang_tidy(sample_copy):
     assert "bugprone-branch-clone" in ids
 
 
+def test_sizeof_value_is_constant_for_narrowing(tmp_path):
+    # sizeof 값이 대상 타입에 들어가면 축소 변환이 아니다 (WPF 앱과 같은 판정)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "s.c").write_text("void f(int n);\nvoid g(void)\n{\n    char c = sizeof(int);\n    f(sizeof(long));\n"
+                             "    (void)c;\n}\n", encoding="utf-8")
+    s = AppState(load_sample=False)
+    s.enable_clang_tidy = False
+    s.add_target_path(str(src))
+    s.run_analysis_sync()
+    narrowing = [d for d in s.filtered_defects if d.rule_id == "implicitNarrowing"]
+    assert narrowing == [], [(d.line, d.message) for d in narrowing]
+    # 부호 변환(unsigned long → int)은 그대로 보고한다
+    assert any(d.rule_id == "implicitSignConversion" and d.line == 5 for d in s.filtered_defects)
+
+
 @pytest.mark.parametrize("clang_tidy", [False, True])
 def test_real_analysis_reports_progress_up_to_100(sample_copy, clang_tidy):
     if clang_tidy and paths.clang_tidy_executable() is None:

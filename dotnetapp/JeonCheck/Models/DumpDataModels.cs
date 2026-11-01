@@ -76,6 +76,9 @@ public class DumpToken
     public bool IsRemovedVoidParameter { get; set; } // 함수 선언의 '(void)'에서 void가 제거된 '(' 토큰
     public string VarId { get; set; } = string.Empty;
     public string MacroName { get; set; } = string.Empty; // 매크로 전개로 생긴 토큰의 원래 매크로 이름 (예: false → 0)
+    public string ValuesId { get; set; } = string.Empty;
+    /// <summary>Cppcheck 값 흐름의 확정(known) 정수 값 (cppcheckdata getKnownIntValue와 같은 규칙). sizeof 값 계산에 쓴다.</summary>
+    public long? KnownIntValue { get; set; }
 
     public string? ValueType { get; set; }
     public string? ValueSign { get; set; } // "signed", "unsigned"

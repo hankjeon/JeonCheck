@@ -106,9 +106,9 @@ cd pyapp
 
 - **도구 경로 지정:** 도구는 환경변수 → (Windows) 저장소 내장 도구 → PATH 순으로 찾습니다. `JEONCHECK_CPPCHECK`, `JEONCHECK_CLANG_TIDY`, `JEONCHECK_ADDON_DIR`(`misra.py`가 있는 addon 폴더) 환경변수로 바꿀 수 있습니다. addon은 사용하는 Cppcheck와 같은 버전이어야 합니다.
 - **프로젝트 파일:** `*.jcproj`는 WPF 앱과 같은 형식이며 서로 열 수 있습니다.
-- **MISRA 범위:** WPF 앱(C# 이식)과 Python 앱(원본 실행) 모두 Cppcheck 2.22 `misra.py`와 같은 결과를 보고합니다. 자체 타입 검사(`implicitNarrowing` 등)는 앱별 구현이라 일부 다를 수 있습니다. 131개 규칙 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. `misra.py`가 규칙 원문 없이 출력하므로 MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, 위치별 상세 원문은 없습니다.
+- **MISRA 범위:** WPF 앱(C# 이식)과 Python 앱(원본 실행) 모두 Cppcheck 2.22 `misra.py`와 같은 결과를 보고합니다. 자체 타입 검사(`implicitNarrowing` 등)와 노트도 두 앱이 같은 결과를 냅니다. 131개 규칙 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. `misra.py`가 규칙 원문 없이 출력하므로 MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, 위치별 상세 원문은 없습니다.
 - **도구 버전:** Linux는 apt 도구(Ubuntu 26.04: Cppcheck 2.19)를 사용하므로 Windows 내장 도구(Cppcheck 2.22)와 진단이 다를 수 있습니다.
-- **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 C# 검사를 Python으로 옮긴 것이며, 필수 타입은 `misra.py`의 `getEssentialType()`으로 계산합니다.
+- **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 WPF 앱의 C# 검사(필수 타입 계산 포함)를 Python으로 그대로 옮긴 것입니다. `sizeof(...)` 값은 Cppcheck가 대상 플랫폼 기준으로 계산한 값을 씁니다.
 
 ### Linux에서 .NET 교차 빌드 (개발용)
 

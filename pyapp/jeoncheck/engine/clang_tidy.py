@@ -83,20 +83,21 @@ def run_clang_tidy(
 
         # 헤더의 같은 진단은 여러 파일에서 반복되므로 입력 순서대로 해석하며 위치 키로 중복을 제거한다.
         issues: list[AnalysisIssue] = []
-        failed: list[tuple[int, str]] = []
-        for code, out, err in outputs:
+        failed: list[tuple[str, int, str]] = []
+        for file, (code, out, err) in zip(input_files, outputs):
             output = out + "\n" + err
             issues += parse_clang_tidy_output(output, target_files, rules_by_id, position_keys)
             if code != 0:
-                failed.append((code, output))
+                failed.append((os.path.basename(file), code, summarize_error_lines(output)))
         if failed:
-            codes = ", ".join(sorted({str(c) for c, _ in failed}))
-            detail = next((d for d in (summarize_error_lines(o) for _, o in failed) if d), "")
+            # WPF 앱과 같은 형식: 실패한 파일 목록과 첫 실패 파일의 종료 코드·원문 요약
+            names = ", ".join(name for name, _, _ in failed)
+            _, first_code, first_summary = failed[0]
             notes.append(AnalysisIssue(
                 rule_id="clangTidyExit", category="포함 파일 / 환경 안내", severity="Info", obligation="참고(Note)",
                 title="Clang-Tidy 비정상 종료 안내",
-                message=(f"[Clang-Tidy 안내] Clang-Tidy가 {len(failed)}개 파일에서 종료 코드 {codes}(으)로 끝났습니다. "
-                         f"컴파일 오류가 있는 파일은 Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {detail}").strip(),
+                message=(f"[Clang-Tidy 안내] {len(failed)}개 파일({names})에서 Clang-Tidy가 종료 코드 {first_code}(으)로 "
+                         f"끝났습니다. 컴파일 오류가 있는 파일은 Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {first_summary}").strip(),
                 is_info_or_note=True))
         return issues
     finally:

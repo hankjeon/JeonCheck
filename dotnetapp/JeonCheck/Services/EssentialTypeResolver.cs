@@ -217,6 +217,15 @@ public static class EssentialTypeResolver
         if (tok == null || tok.ValuePointer > 0)
             return false;
 
+        // sizeof(...)는 Cppcheck가 대상 플랫폼 기준으로 계산한 값(값 흐름)을 쓴다
+        if (tok.Str == "(" && tok.AstOperand1?.Str == "sizeof")
+        {
+            if (tok.KnownIntValue is not long size)
+                return false;
+            value = size;
+            return true;
+        }
+
         if (tok.IsIntLiteral)
             return TryParseIntLiteral(tok.Str, out value);
 

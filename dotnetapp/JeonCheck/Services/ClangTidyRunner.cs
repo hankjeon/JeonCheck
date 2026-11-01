@@ -111,7 +111,9 @@ public class ClangTidyRunner
 
                 psi.ArgumentList.Add("-Wno-everything");
 
+                // 표준 출력과 표준 오류를 따로 모아 '출력 + 줄바꿈 + 오류' 순서로 합친다 (실행마다 같은 원문 요약)
                 var outputBuilder = new StringBuilder();
+                var errorBuilder = new StringBuilder();
                 int exitCode;
                 using (var proc = new Process { StartInfo = psi })
                 {
@@ -123,7 +125,7 @@ public class ClangTidyRunner
                     proc.ErrorDataReceived += (_, e) =>
                     {
                         if (e.Data != null)
-                            outputBuilder.AppendLine(e.Data);
+                            errorBuilder.AppendLine(e.Data);
                     };
 
                     proc.Start();
@@ -133,7 +135,7 @@ public class ClangTidyRunner
                     exitCode = proc.ExitCode;
                 }
 
-                string outputText = outputBuilder.ToString();
+                string outputText = outputBuilder + "\n" + errorBuilder;
                 ParseClangTidyOutput(
                     outputText,
                     targetFilesNormalized,

@@ -105,7 +105,7 @@ flowchart TD
 ```
 
 - **MISRA:** C# 분석기 대신 설치된 Cppcheck와 같은 버전의 `misra.py`를 dump마다 `--cli`로 실행합니다. 검출되는 모든 규칙을 `misra-c2012-X.Y` ID로 보고하며, `rules_ko.json`에 없는 규칙은 미등록 진단 흐름으로 표시합니다. 9.1은 Windows 앱과 같이 Cppcheck `uninitvar` 계열을 매핑합니다.
-- **자체 검사:** `dump_worker.py`가 `cppcheckdata`로 dump를 읽어 `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`를 검사합니다. 필수 타입은 `misra.getEssentialType()`을 사용하고, 함수 호출 결과·배열 요소·멤버·역참조·대입식은 토큰 값 타입으로 보완합니다. 상수 값은 Cppcheck의 known value를 사용합니다.
+- **자체 검사:** `dump_worker.py`가 `cppcheckdata`로 dump를 읽어 `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`를 검사합니다. 두 앱의 결과가 같도록 필수 타입·상수 계산과 검사 흐름은 WPF 앱의 `EssentialTypeResolver`·`TypeConversionAnalyzer`를 그대로 옮겼습니다. `sizeof(...)` 값은 두 앱 모두 Cppcheck 값 흐름의 확정 값을 사용합니다.
 - **커버리지:** 같은 규칙(`tokenlist` 줄 = 분석됨, `rawtokens`에만 있는 코드 줄 = 미검사, 지시문 줄 제외)으로 계산합니다.
 - **도구 선택:** 환경변수(`JEONCHECK_CPPCHECK` 등) → Windows에서는 저장소 `tools/`의 내장 도구 → PATH 순으로 찾습니다. addon은 사용하는 Cppcheck 실행 파일 옆의 `addons` 폴더를 우선하므로 Windows 내장 도구는 `tools/cppcheck/addons`(2.22), Linux apt 도구는 패키지의 addon을 사용합니다. Linux에서는 `tools/`의 Windows 실행 파일을 쓰지 않습니다.
 - **Windows 실행:** 하위 프로세스는 콘솔 창 없이(`CREATE_NO_WINDOW`) 실행하고, 외부 편집기는 VS Code가 없으면 메모장, 폴더 열기는 탐색기 `/select`를 사용합니다. include 후보 비교와 경로 키는 Windows에서 대소문자를 구분하지 않습니다.

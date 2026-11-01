@@ -98,6 +98,7 @@ public class DumpFileParser
                     IsRemovedVoidParameter = ParseBool(tElem.Attribute("isRemovedVoidParameter")),
                     VarId = tElem.Attribute("varId")?.Value ?? string.Empty,
                     MacroName = tElem.Attribute("macroName")?.Value ?? string.Empty,
+                    ValuesId = tElem.Attribute("values")?.Value ?? string.Empty,
                     ValueType = tElem.Attribute("valueType-type")?.Value,
                     ValueSign = tElem.Attribute("valueType-sign")?.Value,
                     ValuePointer = ParseInt(tElem.Attribute("valueType-pointer"), 0),
@@ -204,9 +205,27 @@ public class DumpFileParser
                 .ToList();
         }
 
+        // 값 흐름: 값 목록마다 첫 번째 확정(known) 값의 정수 (cppcheckdata getKnownIntValue와 같은 규칙)
+        var knownById = new Dictionary<string, long?>();
+        var valueflowElem = dumpElem.Element("valueflow");
+        if (valueflowElem != null)
+        {
+            foreach (var vsElem in valueflowElem.Elements("values"))
+            {
+                string id = vsElem.Attribute("id")?.Value ?? string.Empty;
+                var known = vsElem.Elements("value").FirstOrDefault(v => !string.IsNullOrEmpty(v.Attribute("known")?.Value));
+                if (string.IsNullOrEmpty(id) || known == null)
+                    continue;
+                string? iv = known.Attribute("intvalue")?.Value;
+                knownById[id] = long.TryParse(iv, out long parsed) ? parsed : null;
+            }
+        }
+
         // AST 및 참조 링크 연결
         foreach (var tok in unit.Tokens)
         {
+            if (!string.IsNullOrEmpty(tok.ValuesId) && knownById.TryGetValue(tok.ValuesId, out var knownValue))
+                tok.KnownIntValue = knownValue;
             if (!string.IsNullOrEmpty(tok.LinkId) && unit.TokenById.TryGetValue(tok.LinkId, out var linkTok))
                 tok.Link = linkTok;
             if (!string.IsNullOrEmpty(tok.AstParentId) && unit.TokenById.TryGetValue(tok.AstParentId, out var parentTok))
