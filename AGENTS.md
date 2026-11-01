@@ -60,4 +60,4 @@
 - **간결하고 직관적인 구조**: 유지보수와 디버깅이 쉽도록 불필요한 외부 라이브러리 의존성을 최소화하고, .NET 10 WPF 표준 기능과 직관적인 MVVM(또는 깔끔한 모듈 분리) 구조를 사용한다.
 - **데이터 분리**: 타겟 프리셋 설정과 한글 규칙 설명 매핑(`rules_ko.json`)은 코드에 하드코딩하지 않고 JSON/XML 데이터 파일로 분리하여 추후 쉽게 편집·확장할 수 있게 한다.
 - **단계별 검증**: 구현 지시를 받은 후에도 한 번에 과도한 변경을 하기보다, 확인 가능한 단위로 구현하고 빌드 및 동작 여부를 검증한다.
-- **검증 명령과 한계**: [README의 개발·검증 절차](README.md#개발실행검증)와 [콘솔 회귀 테스트 안내](tests/JeonCheck.Analysis.Tests/README.md)를 따른다. 테스트는 `dotnet run --project tests/JeonCheck.Analysis.Tests`로 실행한다. Linux 교차 빌드 성공과 콘솔 테스트 통과를 Windows GUI·내장 도구 통합 검증으로 표현하지 않는다.
+- **검증 명령과 한계**: [README의 개발·검증 절차](README.md#개발실행검증)와 [콘솔 회귀 테스트 안내](dotnetapp/JeonCheck.Analysis.Tests/README.md)를 따른다. 테스트는 `dotnet run --project dotnetapp/JeonCheck.Analysis.Tests`로 실행한다. Linux 교차 빌드 성공과 콘솔 테스트 통과를 Windows GUI·내장 도구 통합 검증으로 표현하지 않는다.

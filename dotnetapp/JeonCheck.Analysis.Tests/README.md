@@ -5,7 +5,7 @@
 저장소 루트에서 .NET 10 SDK로 실행합니다.
 
 ```sh
-dotnet run --project tests/JeonCheck.Analysis.Tests
+dotnet run --project dotnetapp/JeonCheck.Analysis.Tests
 ```
 
 외부 테스트 패키지나 WPF 런타임이 필요 없는 콘솔 실행기입니다. `dotnet test` 대신 위 명령을 사용하며 성공/실패 수를 출력하고 실패 시 종료 코드 1을 반환합니다. 테스트 프로젝트는 솔루션에 포함되지만 **솔루션 빌드만으로 테스트가 실행되지는 않습니다**.
@@ -27,15 +27,15 @@ dotnet run --project tests/JeonCheck.Analysis.Tests
 Windows에서는 다음을 사용합니다.
 
 ```sh
-dotnet restore src/JeonCheck.sln
-dotnet build src/JeonCheck.sln --no-restore -m:1
+dotnet restore dotnetapp/JeonCheck.sln
+dotnet build dotnetapp/JeonCheck.sln --no-restore -m:1
 ```
 
 Linux 교차 빌드는 다음을 사용합니다.
 
 ```sh
-dotnet restore src/JeonCheck.sln -p:EnableWindowsTargeting=true
-dotnet build src/JeonCheck.sln --no-restore -p:EnableWindowsTargeting=true -m:1
+dotnet restore dotnetapp/JeonCheck.sln -p:EnableWindowsTargeting=true
+dotnet build dotnetapp/JeonCheck.sln --no-restore -p:EnableWindowsTargeting=true -m:1
 ```
 
 이 클라우드 환경에서 로컬 SDK를 사용하려면 먼저 활성화합니다.
@@ -50,7 +50,7 @@ export NUGET_PACKAGES=/workspace/.cache/nuget/packages
 
 다음은 실행해야 할 절차이며, Linux에서 통과한 결과로 간주하지 않습니다.
 
-1. 저장소 구조와 Windows용 내장 도구를 유지한 상태에서 `dotnet run --project src/JeonCheck/JeonCheck.csproj`를 실행합니다.
+1. 저장소 구조와 Windows용 내장 도구를 유지한 상태에서 `dotnet run --project dotnetapp/JeonCheck/JeonCheck.csproj`를 실행합니다.
 2. 샘플 프로젝트와 타겟·C 표준·엔진 옵션을 확인하고 분석합니다. 노트와 비정상 종료 여부를 함께 확인합니다. 샘플은 의도적인 결함을 포함하므로 결함 0건을 성공 기준으로 삼지 않습니다.
 3. 결과에 네 탭이 표시되고, 규칙별 요약의 총 진단 수가 동일 필터의 결함 목록 건수와 맞는지 확인합니다. 그룹 펼치기와 파일·줄·코드 표시를 확인합니다.
 4. 같은 줄의 서로 다른 진단을 각각 선택해 코드 줄 이동과 오른쪽 상세 설명을 확인합니다. 줄 배지의 `+N`과 전체 툴팁도 확인합니다.
