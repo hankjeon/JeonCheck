@@ -27,7 +27,7 @@
 
 - **프로젝트명**: **전검사** / `JeonCheck` (임베디드 C 정적 분석 도우미)
 - **개발 환경**: Windows Desktop Application / **.NET 10 (WPF)**
-- **Ubuntu 앱**: `pyapp/`의 **PySide6** 앱. apt Cppcheck·Clang-Tidy와 설치된 Cppcheck의 원본 `misra.py`를 사용하고, 자체 검사 4종(`implicitNarrowing` 등)만 Python으로 옮긴다. 테스트는 `cd pyapp && .venv/bin/python -m pytest -q`로 실행한다.
+- **Ubuntu 앱**: `pyapp/`의 **PySide6** 앱. Linux에서는 apt Cppcheck·Clang-Tidy, Windows에서는 `tools/` 내장 도구를 사용하며, 사용하는 Cppcheck와 같은 버전의 원본 `misra.py`를 실행하고, 자체 검사 4종(`implicitNarrowing` 등)만 Python으로 옮긴다. 테스트는 `cd pyapp && .venv/bin/python -m pytest -q`로 실행한다. Linux 테스트의 Windows 분기 확인을 Windows 실제 실행 검증으로 표현하지 않는다.
 - **정적 분석 엔진**: **Cppcheck (`tools/cppcheck/`)** + **`--dump` AST 기반 C# 분석기** (`misra.py`의 일부 규칙 로직과 자체 타입 검사, Python addon은 실행하지 않음) + **Clang-Tidy (`tools/clang-tidy/`, CERT-C / `bugprone-*` / `clang-analyzer-*` 보조 검사)**. C# 직접 MISRA 검사 25개와 9.1 결과 매핑의 범위는 [아키텍처 문서](doc/02_architecture.md)를 따른다. Python 전체 포팅·전체 MISRA 준수 판정·완전한 검출을 주장하지 않는다.
 - **주요 타겟 프리셋**:
   - TI DSP: `C6746`, `C6655`, `C6672`, `C6678` EABI 32-bit long 및 `C6746`, `C6678` COFF 40-bit long. TI 전용 키워드를 치환하며 Clang-Tidy에는 ARM 대체 트리플을 사용한다. COFF의 자료형 모델이 두 엔진에서 일치한다고 가정하지 않는다.

@@ -7,9 +7,18 @@ import signal
 import subprocess
 import threading
 
+from .. import paths
+
 
 class AnalysisCancelled(Exception):
     """사용자가 분석을 취소함."""
+
+
+def background_process_options() -> dict:
+    """Linux: 취소 시 함께 종료할 수 있도록 새 프로세스 그룹. Windows: 실행할 때마다 콘솔 창이 뜨지 않게 한다."""
+    if paths.IS_WINDOWS:
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {"start_new_session": True}
 
 
 def run_process(args: list[str], cwd: str, cancel: threading.Event | None = None) -> tuple[int, str, str]:
@@ -17,8 +26,7 @@ def run_process(args: list[str], cwd: str, cancel: threading.Event | None = None
         raise AnalysisCancelled()
     proc = subprocess.Popen(
         args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",
-        start_new_session=(os.name == "posix"),
+        text=True, encoding="utf-8", errors="replace", **background_process_options(),
     )
     while True:
         try:
@@ -32,10 +40,10 @@ def run_process(args: list[str], cwd: str, cancel: threading.Event | None = None
 
 def kill(proc: subprocess.Popen) -> None:
     try:
-        if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGKILL)
+        if paths.IS_WINDOWS:
+            proc.kill()  # 실행하는 도구는 하위 프로세스를 만들지 않으므로 해당 프로세스만 종료
         else:
-            proc.kill()
+            os.killpg(proc.pid, signal.SIGKILL)
         proc.communicate(timeout=5)
     except Exception:
         pass  # 이미 종료되었거나 접근 불가

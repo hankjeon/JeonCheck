@@ -58,7 +58,7 @@ class IncludePathResolver:
         files = list(dict.fromkeys(files))
         by_name: dict[str, list[str]] = {}
         for f in files:
-            by_name.setdefault(os.path.basename(f), []).append(f)
+            by_name.setdefault(os.path.normcase(os.path.basename(f)), []).append(f)
 
         need_virtual = False
         for src in files:
@@ -76,7 +76,7 @@ class IncludePathResolver:
                 if self._resolvable(raw, src_dir, dirs):
                     continue
                 # 2) 사용자가 추가한 파일 중 파일명이 일치하는 후보 검색
-                candidates = by_name.get(os.path.basename(_native(raw)))
+                candidates = by_name.get(os.path.normcase(os.path.basename(_native(raw))))
                 if not candidates:
                     continue
                 best = self._best_match(raw, candidates)
@@ -108,7 +108,7 @@ class IncludePathResolver:
         for cand in candidates:
             parts = _split(cand)
             score, i, j = 0, len(inc) - 1, len(parts) - 1
-            while i >= 0 and j >= 0 and inc[i] == parts[j]:
+            while i >= 0 and j >= 0 and os.path.normcase(inc[i]) == os.path.normcase(parts[j]):
                 score, i, j = score + 1, i - 1, j - 1
             if score > best_score:
                 best, best_score = cand, score
@@ -120,7 +120,8 @@ class IncludePathResolver:
         if any(p in (".", "..") for p in parts) or not parts:
             return None
         suffix = os.path.join(*parts)
-        if actual.endswith(os.sep + suffix):
+        # Windows는 경로 대소문자를 구분하지 않으므로 normcase로 비교한다 (Linux에서는 그대로)
+        if os.path.normcase(actual).endswith(os.path.normcase(os.sep + suffix)):
             ancestor = actual[: len(actual) - len(suffix) - 1]
             if ancestor and os.path.isdir(ancestor):
                 return os.path.abspath(ancestor)
