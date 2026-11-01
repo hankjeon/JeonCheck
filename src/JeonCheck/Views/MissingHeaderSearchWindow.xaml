@@ -1,0 +1,190 @@
+<Window x:Class="JeonCheck.Views.MissingHeaderSearchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:JeonCheck.Models"
+        Title="누락 헤더 파일 검색 및 참조 코드 추가"
+        Icon="pack://application:,,,/Resources/app_icon.ico"
+        Width="960" Height="620"
+        MinWidth="760" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="#1E1E1E"
+        Foreground="#E6EDF3">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 1. 상단 타이틀 및 설명 -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock Text="🔍 누락된 포함 파일(#include) 하위 폴더 일괄 검색" FontSize="16.5" FontWeight="Bold" Foreground="#58A6FF" />
+            <TextBlock Text="상위 폴더(SDK, BSP, 프로젝트 루트 등)를 선택하면 하위 모든 폴더를 뒤져 누락된 헤더를 찾아줍니다. 중복된 파일은 가장 알맞은 경로를 추천하며 드롭다운에서 직접 변경할 수 있습니다."
+                       FontSize="12" Foreground="#9DA7B3" Margin="0,3,0,0" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- 2. 검색 폴더 선택 바 -->
+        <Border Grid.Row="1" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Content="📂 다른 폴더 추가로 검색..."
+                            Style="{StaticResource DarkButtonStyle}"
+                            Click="SelectFolderAndSearch_Click"
+                            Padding="10,4"
+                            FontWeight="SemiBold"
+                            ToolTip="폴더를 선택하여 하위 폴더 전체에서 누락된 헤더들을 검색합니다 (여러 폴더를 차례로 검색하면 후보가 누적됩니다)" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="검색한 폴더:" Foreground="#9DA7B3" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock x:Name="SearchedFoldersText"
+                               Text="(아직 선택된 폴더 없음)"
+                               Foreground="#E6EDF3"
+                               FontFamily="{StaticResource CodingFont}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- 3. 검색 결과 통계 및 일괄 선택 바 -->
+        <Border Grid.Row="2" Background="#202022" BorderBrush="#333337" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,8">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Content="발견된 항목 전체 선택" Style="{StaticResource DarkButtonStyle}" Padding="8,2" FontSize="11.5" Click="SelectAllFound_Click" />
+                    <Button Content="전체 해제" Style="{StaticResource DarkButtonStyle}" Padding="8,2" FontSize="11.5" Click="UnselectAll_Click" />
+                </StackPanel>
+                <TextBlock x:Name="SummaryStatusText"
+                           Text="검색 대기 중..."
+                           VerticalAlignment="Center"
+                           Foreground="#D0D7DE"
+                           FontWeight="SemiBold" />
+            </DockPanel>
+        </Border>
+
+        <!-- 4. 누락 헤더별 검색 결과 및 중복 경로 선택 DataGrid -->
+        <DataGrid x:Name="HeadersDataGrid"
+                  Grid.Row="3"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  SelectionMode="Single"
+                  Background="#1E1E1E"
+                  RowBackground="#252526"
+                  AlternatingRowBackground="#202022"
+                  Foreground="#E6EDF3"
+                  BorderBrush="#3E3E42"
+                  GridLinesVisibility="Horizontal"
+                  HorizontalGridLinesBrush="#333337"
+                  HeadersVisibility="Column"
+                  RowHeaderWidth="0">
+            <DataGrid.Resources>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="#2D2D30" />
+                    <Setter Property="Foreground" Value="#E6EDF3" />
+                    <Setter Property="Padding" Value="8,6" />
+                    <Setter Property="BorderBrush" Value="#3E3E42" />
+                    <Setter Property="BorderThickness" Value="0,0,1,1" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </Style>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="Padding" Value="6,4" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="#263545" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.Resources>
+            <DataGrid.Columns>
+                <!-- 추가 여부 체크박스 -->
+                <DataGridTemplateColumn Header="추가" Width="52">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate DataType="{x:Type models:MissingHeaderSearchItem}">
+                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEnabled="{Binding CanSelect}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- 검색 상태 (발견 / 중복 / 미발견) -->
+                <DataGridTemplateColumn Header="검색 상태" Width="135">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate DataType="{x:Type models:MissingHeaderSearchItem}">
+                            <TextBlock x:Name="StatusTxt" Text="{Binding StatusDisplay}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Status}" Value="FoundSingle">
+                                    <Setter TargetName="StatusTxt" Property="Foreground" Value="#3FB950" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="FoundMultiple">
+                                    <Setter TargetName="StatusTxt" Property="Foreground" Value="#F2CC60" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="NotFound">
+                                    <Setter TargetName="StatusTxt" Property="Foreground" Value="#F85149" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- 누락된 #include 헤더명 -->
+                <DataGridTextColumn Header="누락된 #include 헤더" Binding="{Binding RawInclude}" IsReadOnly="True" Width="180" FontFamily="{StaticResource CodingFont}" />
+
+                <!-- 참조한 소스 파일 -->
+                <DataGridTextColumn Header="참조한 소스" Binding="{Binding ReferencedByDisplay}" IsReadOnly="True" Width="140" />
+
+                <!-- 발견된 경로 (단일이면 텍스트, 중복이면 드롭다운 콤보박스) -->
+                <DataGridTemplateColumn Header="발견된 파일 경로 (중복 발견 시 클릭하여 다른 경로 선택 가능)" Width="*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate DataType="{x:Type models:MissingHeaderSearchItem}">
+                            <Grid VerticalAlignment="Center">
+                                <TextBlock x:Name="SinglePathText"
+                                           Text="{Binding SingleOrNotFoundDisplay}"
+                                           FontFamily="{StaticResource CodingFont}"
+                                           Foreground="#D0D7DE"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding SingleOrNotFoundDisplay}"
+                                           Visibility="{Binding HasSingleOrNoCandidate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                                <ComboBox ItemsSource="{Binding CandidatePaths}"
+                                          SelectedItem="{Binding SelectedCandidatePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          FontFamily="{StaticResource CodingFont}"
+                                          ToolTip="{Binding SelectedCandidatePath}"
+                                          Visibility="{Binding HasMultipleCandidates, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Status}" Value="NotFound">
+                                    <Setter TargetName="SinglePathText" Property="Foreground" Value="#6E7681" />
+                                    <Setter TargetName="SinglePathText" Property="FontStyle" Value="Italic" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- 5. 하단 안내 및 확인/취소 버튼 -->
+        <DockPanel Grid.Row="4" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <Button Content="취소" Width="88" Style="{StaticResource DarkButtonStyle}" IsCancel="True" Click="CancelButton_Click" Margin="0,0,8,0" />
+                <Button Content="✔ 선택한 헤더 파일들을 참조 코드에 추가"
+                        Style="{StaticResource PrimaryRunButtonStyle}"
+                        Padding="14,5"
+                        IsDefault="True"
+                        Click="ConfirmAdd_Click" />
+            </StackPanel>
+
+            <TextBlock Text="※ 체크된 헤더 파일들만 [참조코드(비대상)] 목록에 개별 파일로 추가되며, 분석 시 상위 #include 경로(-I)가 자동 연결됩니다."
+                       Foreground="#9DA7B3"
+                       FontSize="12"
+                       VerticalAlignment="Center" />
+        </DockPanel>
+    </Grid>
+</Window>

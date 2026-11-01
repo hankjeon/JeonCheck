@@ -7,12 +7,20 @@ namespace JeonCheck.Services;
 
 public class DataRepository
 {
+    private const int MaxRecentProjects = 10;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
+
+    private static string UserSettingsFilePath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "JeonCheck",
+            "user_settings.json");
 
     public List<TargetPreset> LoadTargetPresets()
     {
@@ -96,6 +104,65 @@ public class DataRepository
         }
 
         return project;
+    }
+
+    public List<string> LoadRecentProjects()
+    {
+        try
+        {
+            string path = UserSettingsFilePath;
+            if (!File.Exists(path))
+                return new List<string>();
+
+            string json = File.ReadAllText(path);
+            var settings = JsonSerializer.Deserialize<UserSettingsModel>(json, JsonOptions);
+            if (settings?.RecentProjects == null)
+                return new List<string>();
+
+            return settings.RecentProjects
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => Path.GetFullPath(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(MaxRecentProjects)
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    public void SaveRecentProjects(IEnumerable<string> recentPaths)
+    {
+        try
+        {
+            string path = UserSettingsFilePath;
+            string? dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            var model = new UserSettingsModel
+            {
+                RecentProjects = recentPaths
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => Path.GetFullPath(p))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxRecentProjects)
+                    .ToList()
+            };
+
+            string json = JsonSerializer.Serialize(model, JsonOptions);
+            File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // 사용자 AppData 저장 실패 시 무시
+        }
+    }
+
+    private sealed class UserSettingsModel
+    {
+        public List<string> RecentProjects { get; set; } = new();
     }
 
     private static string ToStoredPath(string fullPath, string? baseDir)

@@ -26,6 +26,7 @@ public class ClangTidyRunner
         Dictionary<string, RuleInfo> rulesById,
         HashSet<string> existingPositionKeys,
         List<AnalysisIssue> notes,
+        Action<int, int, string>? onFileProgress = null,
         CancellationToken cancellationToken = default)
     {
         var issues = new List<AnalysisIssue>();
@@ -41,105 +42,118 @@ public class ClangTidyRunner
             Directory.CreateDirectory(stubBaseDir);
             CreateMissingHeaderStubs(inputSourceFiles, includeDirs, stubDir, stubBaseDir);
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = clangTidyExe,
-                WorkingDirectory = Path.GetDirectoryName(clangTidyExe) ?? PathResolver.RootDirectory,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
-
-            psi.ArgumentList.Add("-checks=-*,bugprone-*,cert-*,clang-analyzer-*");
-            psi.ArgumentList.Add("--quiet");
-
-            foreach (var src in inputSourceFiles)
-                psi.ArgumentList.Add(src);
-
-            psi.ArgumentList.Add("--");
-            psi.ArgumentList.Add("-xc");
-            psi.ArgumentList.Add($"-std={cStandard}");
-
             string clangTarget = !string.IsNullOrWhiteSpace(targetPreset.ClangTarget)
                 ? targetPreset.ClangTarget
                 : "armv7r-none-eabi";
-            psi.ArgumentList.Add($"--target={clangTarget}");
-            psi.ArgumentList.Add("-nostdinc");
-
             string builtinInc = PathResolver.ClangTidyIncludeDirectory;
-            if (Directory.Exists(builtinInc))
-            {
-                psi.ArgumentList.Add("-isystem");
-                psi.ArgumentList.Add(builtinInc);
-            }
+            string workingDir = Path.GetDirectoryName(clangTidyExe) ?? PathResolver.RootDirectory;
 
-            foreach (var inc in includeDirs)
-            {
-                psi.ArgumentList.Add("-I");
-                psi.ArgumentList.Add(inc);
-            }
+            var failedFiles = new List<(string FileName, int ExitCode, string Summary)>();
 
-            // 누락 헤더 자동 더미(Stub) 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
-            psi.ArgumentList.Add("-I");
-            psi.ArgumentList.Add(stubBaseDir);
-
-            foreach (var def in targetPreset.Defines)
+            for (int i = 0; i < inputSourceFiles.Count; i++)
             {
-                if (!string.IsNullOrWhiteSpace(def))
-                    psi.ArgumentList.Add($"-D{def.Trim()}");
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            if (!string.IsNullOrWhiteSpace(customDefines))
-            {
-                var splitDefs = customDefines.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var d in splitDefs)
+                string src = inputSourceFiles[i];
+                string fileName = Path.GetFileName(src);
+                onFileProgress?.Invoke(i, inputSourceFiles.Count, fileName);
+
+                var psi = new ProcessStartInfo
                 {
-                    string cleaned = d.Trim();
-                    if (cleaned.StartsWith("-D", StringComparison.Ordinal))
-                        cleaned = cleaned.Substring(2);
-                    if (!string.IsNullOrWhiteSpace(cleaned))
-                        psi.ArgumentList.Add($"-D{cleaned}");
+                    FileName = clangTidyExe,
+                    WorkingDirectory = workingDir,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                };
+
+                psi.ArgumentList.Add("-checks=-*,bugprone-*,cert-*,clang-analyzer-*");
+                psi.ArgumentList.Add("--quiet");
+                psi.ArgumentList.Add(src);
+                psi.ArgumentList.Add("--");
+                psi.ArgumentList.Add("-xc");
+                psi.ArgumentList.Add($"-std={cStandard}");
+                psi.ArgumentList.Add($"--target={clangTarget}");
+                psi.ArgumentList.Add("-nostdinc");
+
+                if (Directory.Exists(builtinInc))
+                {
+                    psi.ArgumentList.Add("-isystem");
+                    psi.ArgumentList.Add(builtinInc);
                 }
-            }
 
-            psi.ArgumentList.Add("-Wno-everything");
-
-            var outputBuilder = new StringBuilder();
-            int exitCode;
-            using (var proc = new Process { StartInfo = psi })
-            {
-                proc.OutputDataReceived += (_, e) =>
+                foreach (var inc in includeDirs)
                 {
-                    if (e.Data != null)
-                        outputBuilder.AppendLine(e.Data);
-                };
-                proc.ErrorDataReceived += (_, e) =>
+                    psi.ArgumentList.Add("-I");
+                    psi.ArgumentList.Add(inc);
+                }
+
+                // 누락 헤더 자동 더미(Stub) 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
+                psi.ArgumentList.Add("-I");
+                psi.ArgumentList.Add(stubBaseDir);
+
+                foreach (var def in targetPreset.Defines)
                 {
-                    if (e.Data != null)
-                        outputBuilder.AppendLine(e.Data);
-                };
+                    if (!string.IsNullOrWhiteSpace(def))
+                        psi.ArgumentList.Add($"-D{def.Trim()}");
+                }
 
-                proc.Start();
-                proc.BeginOutputReadLine();
-                proc.BeginErrorReadLine();
-                await ProcessHelper.WaitForExitOrKillAsync(proc, cancellationToken);
-                exitCode = proc.ExitCode;
+                if (!string.IsNullOrWhiteSpace(customDefines))
+                {
+                    foreach (var cleaned in ProcessHelper.ParseCustomDefines(customDefines))
+                    {
+                        psi.ArgumentList.Add($"-D{cleaned}");
+                    }
+                }
+
+                psi.ArgumentList.Add("-Wno-everything");
+
+                var outputBuilder = new StringBuilder();
+                int exitCode;
+                using (var proc = new Process { StartInfo = psi })
+                {
+                    proc.OutputDataReceived += (_, e) =>
+                    {
+                        if (e.Data != null)
+                            outputBuilder.AppendLine(e.Data);
+                    };
+                    proc.ErrorDataReceived += (_, e) =>
+                    {
+                        if (e.Data != null)
+                            outputBuilder.AppendLine(e.Data);
+                    };
+
+                    proc.Start();
+                    proc.BeginOutputReadLine();
+                    proc.BeginErrorReadLine();
+                    await ProcessHelper.WaitForExitOrKillAsync(proc, cancellationToken);
+                    exitCode = proc.ExitCode;
+                }
+
+                string outputText = outputBuilder.ToString();
+                ParseClangTidyOutput(
+                    outputText,
+                    targetFilesNormalized,
+                    rulesById,
+                    existingPositionKeys,
+                    issues);
+
+                if (exitCode != 0)
+                {
+                    failedFiles.Add((fileName, exitCode, ProcessHelper.SummarizeErrorLines(outputText)));
+                }
+
+                onFileProgress?.Invoke(i + 1, inputSourceFiles.Count, fileName);
             }
-
-            string outputText = outputBuilder.ToString();
-            ParseClangTidyOutput(
-                outputText,
-                targetFilesNormalized,
-                rulesById,
-                existingPositionKeys,
-                issues);
 
             // Clang-Tidy 비정상 종료(컴파일 오류 등)는 분석 결과 일부 누락 가능성을 노트로 안내
-            if (exitCode != 0)
+            if (failedFiles.Count > 0)
             {
+                var firstFail = failedFiles[0];
+                string fileList = string.Join(", ", failedFiles.Select(f => f.FileName));
                 notes.Add(new AnalysisIssue
                 {
                     RuleId = "clangTidyExit",
@@ -147,7 +161,7 @@ public class ClangTidyRunner
                     Severity = "Info",
                     Obligation = "참고(Note)",
                     Title = "Clang-Tidy 비정상 종료 안내",
-                    Message = $"[Clang-Tidy 안내] Clang-Tidy가 종료 코드 {exitCode}(으)로 끝났습니다. 컴파일 오류가 있는 파일은 Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {ProcessHelper.SummarizeErrorLines(outputText)}",
+                    Message = $"[Clang-Tidy 안내] {failedFiles.Count}개 파일({fileList})에서 Clang-Tidy가 종료 코드 {firstFail.ExitCode}(으)로 끝났습니다. 컴파일 오류가 있는 파일은 Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {firstFail.Summary}".Trim(),
                     IsInfoOrNote = true
                 });
             }

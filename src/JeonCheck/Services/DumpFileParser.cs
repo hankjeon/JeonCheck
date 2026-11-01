@@ -28,7 +28,7 @@ public class DumpFileParser
             doc.Platform.PointerBit = ParseInt(platElem.Attribute("pointer_bit"), 32);
         }
 
-        // 2.各 <dump> 설정 단위 파싱
+        // 2. 각 <dump> 설정 단위 파싱
         foreach (var dumpElem in root.Elements("dump"))
         {
             var unit = ParseDumpUnit(dumpElem);
@@ -103,6 +103,7 @@ public class DumpFileParser
                     ValuePointer = ParseInt(tElem.Attribute("valueType-pointer"), 0),
                     ValueConstness = ParseInt(tElem.Attribute("valueType-constness"), 0),
                     ValueVolatileness = ParseInt(tElem.Attribute("valueType-volatileness"), 0),
+                    ValueTypeScopeId = tElem.Attribute("valueType-typeScope")?.Value ?? string.Empty,
                     OriginalTypeName = tElem.Attribute("valueType-originalTypeName")?.Value
                 };
 

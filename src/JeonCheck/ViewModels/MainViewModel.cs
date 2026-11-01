@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -19,6 +19,7 @@ public class MainViewModel : INotifyPropertyChanged
     private bool _forceAllIfdefConfigs;
     private bool _enableClangTidy = true;
     private bool _isAnalyzing;
+    private double _analysisProgressPercent;
     private string _statusMessage = "준비 완료";
     private string _currentProjectFilePath = string.Empty;
     private string _currentCodeFilePath = string.Empty;
@@ -44,6 +45,7 @@ public class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<AnalysisIssue> FilteredDefects { get; } = new();
     public ObservableCollection<AnalysisIssue> NotesAndInfos { get; } = new();
     public ObservableCollection<SuppressedIssueEntry> SuppressedIssues { get; } = new();
+    public ObservableCollection<string> RecentProjects { get; } = new();
     public ObservableCollection<string> DefectCategoryFilters { get; } = new()
     {
         "전체", "타입 및 형변환", "MISRA C 2012", "Clang-Tidy / CERT-C", "메모리 및 포인터", "산술 및 연산", "제어 흐름 및 품질", "구문 및 환경"
@@ -82,16 +84,46 @@ public class MainViewModel : INotifyPropertyChanged
     public bool IsAnalyzing
     {
         get => _isAnalyzing;
-        set { if (_isAnalyzing != value) { _isAnalyzing = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanAnalyze)); } }
+        set
+        {
+            if (_isAnalyzing != value)
+            {
+                _isAnalyzing = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanAnalyze));
+                OnPropertyChanged(nameof(RunButtonText));
+            }
+        }
     }
 
     public bool CanAnalyze => !_isAnalyzing;
+
+    public double AnalysisProgressPercent
+    {
+        get => _analysisProgressPercent;
+        set
+        {
+            double clamped = Math.Clamp(value, 0.0, 100.0);
+            if (Math.Abs(_analysisProgressPercent - clamped) > 0.01)
+            {
+                _analysisProgressPercent = clamped;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(RunButtonText));
+            }
+        }
+    }
+
+    public string RunButtonText => _isAnalyzing
+        ? $"⏳ 정적 분석 중 ({_analysisProgressPercent:F0}%)"
+        : "▶ 정적 분석 시작";
 
     public string StatusMessage
     {
         get => _statusMessage;
         set { if (_statusMessage != value) { _statusMessage = value; OnPropertyChanged(); } }
     }
+
+    public string CurrentProjectFilePath => _currentProjectFilePath;
 
     public string CurrentProjectTitle => string.IsNullOrEmpty(_currentProjectFilePath)
         ? "전검사 (JeonCheck) - 임베디드 C 정적 분석 도우미 (미저장 프로젝트)"
@@ -226,8 +258,21 @@ public class MainViewModel : INotifyPropertyChanged
             AllRules.Add(r);
         }
 
-        // 초기 샘플 코드가 존재하면 바로 테스트할 수 있도록 로드
-        if (Directory.Exists(PathResolver.SamplesDirectory))
+        foreach (var rp in _repository.LoadRecentProjects())
+            RecentProjects.Add(rp);
+
+        // 마지막에 사용하던 프로젝트가 존재하면 자동으로 불러오고, 없으면 초기 샘플 프로젝트를 로드
+        string? lastProjectPath = RecentProjects.FirstOrDefault(File.Exists);
+        if (!string.IsNullOrEmpty(lastProjectPath))
+        {
+            LoadProjectFromFile(lastProjectPath);
+            if (!string.IsNullOrEmpty(_currentProjectFilePath))
+            {
+                StatusMessage = $"최근 프로젝트 자동 불러오기 완료: {lastProjectPath}";
+            }
+        }
+
+        if (string.IsNullOrEmpty(_currentProjectFilePath) && Directory.Exists(PathResolver.SamplesDirectory))
         {
             LoadSampleWorkspace();
         }
@@ -276,6 +321,7 @@ public class MainViewModel : INotifyPropertyChanged
         NotesAndInfos.Clear();
         SuppressedIssues.Clear();
         CurrentFileLines.Clear();
+        CodeLinesReloaded?.Invoke();
         CurrentCodeFilePath = string.Empty;
         SelectedIssue = null;
         CodeStatsSummary = "파일을 선택하면 라인별 검사 상태가 표시됩니다.";
@@ -450,6 +496,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         try
         {
+            AnalysisProgressPercent = 0;
             IsAnalyzing = true;
             StatusMessage = $"[{SelectedTargetPreset.Name}] 프리셋으로 {targetFileCount}개 파일 정적 분석 및 AST 검사 중... (취소하려면 [■ 분석 취소])";
 
@@ -463,6 +510,13 @@ public class MainViewModel : INotifyPropertyChanged
             var nonTargetSnapshot = NonTargetRoots.Select(r => r.CloneTree()).ToList();
             var rulesSnapshot = AllRules.ToList();
             var token = cts.Token;
+            var progress = new Progress<AnalysisProgressInfo>(info =>
+            {
+                if (!ReferenceEquals(_analysisCts, cts))
+                    return;
+                AnalysisProgressPercent = Math.Max(AnalysisProgressPercent, info.Percent);
+                StatusMessage = $"[{AnalysisProgressPercent:F0}%] {info.DetailMessage}";
+            });
 
             var runResult = await Task.Run(() => _runner.RunAnalysisAsync(
                 preset,
@@ -473,6 +527,7 @@ public class MainViewModel : INotifyPropertyChanged
                 targetSnapshot,
                 nonTargetSnapshot,
                 rulesSnapshot,
+                progress,
                 token), token);
 
             // 분석 도중 작업 공간이 바뀌었으면(새 프로젝트/불러오기) 이전 결과는 버림
@@ -521,6 +576,7 @@ public class MainViewModel : INotifyPropertyChanged
                 _analysisCts = null;
             cts.Dispose();
             IsAnalyzing = false;
+            AnalysisProgressPercent = 0;
             NotifyCountsChanged();
         }
     }
@@ -595,7 +651,13 @@ public class MainViewModel : INotifyPropertyChanged
                 analyzedCount++;
                 lineVm.Issues = lineIssues;
                 bool hasError = lineIssues.Any(x => x.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase));
-                lineVm.Status = hasError ? CodeLineStatus.Error : CodeLineStatus.Warning;
+                bool hasWarning = lineIssues.Any(x =>
+                    x.Severity.Equals("Warning", StringComparison.OrdinalIgnoreCase) &&
+                    !x.Obligation.Contains("권고", StringComparison.OrdinalIgnoreCase) &&
+                    !x.Obligation.Contains("Advisory", StringComparison.OrdinalIgnoreCase));
+                lineVm.Status = hasError
+                    ? CodeLineStatus.Error
+                    : (hasWarning ? CodeLineStatus.Warning : CodeLineStatus.Advisory);
 
                 var primary = lineIssues[0];
                 string extra = lineIssues.Count > 1 ? $" +{lineIssues.Count - 1}" : string.Empty;
@@ -648,7 +710,11 @@ public class MainViewModel : INotifyPropertyChanged
         {
             CodeStatsSummary = $"총 {rawLines.Length}줄  |  (아직 정적 분석이 실행되지 않았거나 비대상 파일입니다)";
         }
+
+        CodeLinesReloaded?.Invoke();
     }
+
+    public event Action? CodeLinesReloaded;
 
     public void RefreshFilteredDefects()
     {
@@ -840,9 +906,10 @@ public class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        _currentProjectFilePath = filePath;
+        _currentProjectFilePath = Path.GetFullPath(filePath);
+        AddRecentProject(_currentProjectFilePath);
         OnPropertyChanged(nameof(CurrentProjectTitle));
-        StatusMessage = $"프로젝트 저장 완료: {filePath}";
+        StatusMessage = $"프로젝트 저장 완료: {_currentProjectFilePath}";
     }
 
     public void LoadProjectFromFile(string filePath)
@@ -865,7 +932,8 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         ClearWorkspace();
-        _currentProjectFilePath = filePath;
+        _currentProjectFilePath = Path.GetFullPath(filePath);
+        AddRecentProject(_currentProjectFilePath);
         OnPropertyChanged(nameof(CurrentProjectTitle));
 
         SelectedTargetPreset = TargetPresets.FirstOrDefault(t => t.Id == model.TargetPresetId) ?? TargetPresets.FirstOrDefault();
@@ -929,6 +997,49 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = $"프로젝트 불러오기 완료: {filePath}";
     }
 
+    public void AddRecentProject(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return;
+
+        string fullPath = Path.GetFullPath(filePath);
+        for (int i = RecentProjects.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(RecentProjects[i], fullPath, StringComparison.OrdinalIgnoreCase))
+                RecentProjects.RemoveAt(i);
+        }
+
+        RecentProjects.Insert(0, fullPath);
+        while (RecentProjects.Count > 10)
+        {
+            RecentProjects.RemoveAt(RecentProjects.Count - 1);
+        }
+
+        _repository.SaveRecentProjects(RecentProjects);
+        RecentProjectsChanged?.Invoke();
+    }
+
+    public void RemoveRecentProject(string filePath)
+    {
+        for (int i = RecentProjects.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(RecentProjects[i], filePath, StringComparison.OrdinalIgnoreCase))
+                RecentProjects.RemoveAt(i);
+        }
+
+        _repository.SaveRecentProjects(RecentProjects);
+        RecentProjectsChanged?.Invoke();
+    }
+
+    public void ClearRecentProjects()
+    {
+        RecentProjects.Clear();
+        _repository.SaveRecentProjects(RecentProjects);
+        RecentProjectsChanged?.Invoke();
+        StatusMessage = "최근 사용한 프로젝트 목록을 비웠습니다.";
+    }
+
+    public event Action? RecentProjectsChanged;
     public void OpenCurrentFileInExternalEditor(int line = 1)
     {
         if (string.IsNullOrEmpty(CurrentCodeFilePath) || !File.Exists(CurrentCodeFilePath))

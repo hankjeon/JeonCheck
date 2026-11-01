@@ -1,10 +1,13 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using JeonCheck.Models;
 
 namespace JeonCheck.Services;
+
+public record AnalysisProgressInfo(double Percent, string DetailMessage);
 
 public class AnalysisRunResult
 {
@@ -19,6 +22,14 @@ public class CppcheckRunner
     private readonly DumpFileParser _dumpParser = new();
     private readonly MisraAndTypeAnalyzer _misraAnalyzer = new();
     private readonly ClangTidyRunner _clangTidyRunner = new();
+
+    private static readonly Regex CppcheckPercentRegex = new(
+        @"(?<done>\d+)\s*/\s*(?<total>\d+)\s+files\s+checked\s+(?<pct>\d+)%\s+done",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex CppcheckCheckingRegex = new(
+        @"^Checking\s+(?<target>.+?)\.\.\.",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// MISRA C 2012 Rule 9.1(초기화 전 값 사용)에 해당하는 Cppcheck 결함 ID.
@@ -64,6 +75,7 @@ public class CppcheckRunner
         IReadOnlyList<SourceTreeNode> targetRoots,
         IReadOnlyList<SourceTreeNode> nonTargetRoots,
         IReadOnlyList<RuleInfo> allRules,
+        IProgress<AnalysisProgressInfo>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var result = new AnalysisRunResult();
@@ -134,14 +146,9 @@ public class CppcheckRunner
 
         if (!string.IsNullOrWhiteSpace(customDefines))
         {
-            var splitDefs = customDefines.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var d in splitDefs)
+            foreach (var cleaned in ProcessHelper.ParseCustomDefines(customDefines))
             {
-                string cleaned = d.Trim();
-                if (cleaned.StartsWith("-D", StringComparison.Ordinal))
-                    cleaned = cleaned.Substring(2);
-                if (!string.IsNullOrWhiteSpace(cleaned))
-                    baseArgs.Add($"-D{cleaned}");
+                baseArgs.Add($"-D{cleaned}");
             }
         }
 
@@ -152,6 +159,12 @@ public class CppcheckRunner
         }
 
         result.CommandLineSummary = $"cppcheck {string.Join(" ", baseArgs.Concat(inputSourceFiles).Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}";
+
+        bool runClangTidy = enableClangTidy && File.Exists(PathResolver.ClangTidyExePath);
+        double firstPassEndPct = runClangTidy ? 50.0 : 90.0;
+        double secondPassEndPct = runClangTidy ? 55.0 : 98.0;
+
+        progress?.Report(new AnalysisProgressInfo(2.0, $"Cppcheck 정적 분석 준비 중 ({inputSourceFiles.Count}개 파일)..."));
 
         // 분석 전체(1차/2차 Cppcheck, Clang-Tidy)에서 공유하는 중복 제거 키
         var keys = new DedupKeys();
@@ -164,7 +177,8 @@ public class CppcheckRunner
         {
             // 3~5. 1차 분석: 소스 파일(.c) 기준
             await RunCppcheckPassAsync(cppcheckExe, baseArgs, inputSourceFiles, dumpGuard,
-                targetFilesNormalized, rulesById, result, keys, cancellationToken);
+                targetFilesNormalized, rulesById, result, keys,
+                2.0, firstPassEndPct, progress, cancellationToken);
 
             // 5-1. 2차 분석: 어느 소스 파일에도 포함되지 않아 1차 분석 dump에 나타나지 않은 대상 헤더를 직접 검사
             if (headersExcludedFromFirstPass)
@@ -183,14 +197,18 @@ public class CppcheckRunner
                         string.Empty));
 
                     await RunCppcheckPassAsync(cppcheckExe, baseArgs, uncoveredHeaders, dumpGuard,
-                        targetFilesNormalized, rulesById, result, keys, cancellationToken);
+                        targetFilesNormalized, rulesById, result, keys,
+                        firstPassEndPct, secondPassEndPct, progress, cancellationToken);
                     clangInputFiles.AddRange(uncoveredHeaders);
                 }
             }
 
             // 6. Clang-Tidy 심층 분석 실행 (CERT-C / bugprone / clang-analyzer 통합 및 누락 헤더 자동 더미 처리)
-            if (enableClangTidy && File.Exists(PathResolver.ClangTidyExePath))
+            if (runClangTidy)
             {
+                double clangStartPct = secondPassEndPct;
+                double clangSpan = 99.0 - clangStartPct;
+
                 var clangIssues = await _clangTidyRunner.RunAsync(
                     targetPreset,
                     cStandard,
@@ -201,11 +219,22 @@ public class CppcheckRunner
                     rulesById,
                     keys.PositionKeys,
                     result.NotesAndInfos,
+                    (doneCount, totalCount, fileName) =>
+                    {
+                        double ratio = totalCount > 0 ? (double)doneCount / totalCount : 1.0;
+                        double pct = clangStartPct + (clangSpan * ratio);
+                        int displayIdx = Math.Min(doneCount + 1, totalCount);
+                        progress?.Report(new AnalysisProgressInfo(
+                            pct,
+                            $"Clang-Tidy 심층 분석 중 ({displayIdx}/{totalCount}): {fileName}"));
+                    },
                     cancellationToken);
 
                 result.Defects.AddRange(clangIssues);
             }
         }
+
+        progress?.Report(new AnalysisProgressInfo(100.0, "분석 결과 정리 중..."));
 
         // 정렬: 파일명 -> 줄 번호 -> 중요도 순
         result.Defects = result.Defects
@@ -230,8 +259,16 @@ public class CppcheckRunner
         Dictionary<string, RuleInfo> rulesById,
         AnalysisRunResult result,
         DedupKeys keys,
+        double startPct,
+        double endPct,
+        IProgress<AnalysisProgressInfo>? progress,
         CancellationToken cancellationToken)
     {
+        double totalSpan = Math.Max(1.0, endPct - startPct);
+        double cppcheckExecEndPct = startPct + (totalSpan * 0.75);
+        double cppcheckSpan = cppcheckExecEndPct - startPct;
+        double currentCppcheckRatio = 0.0;
+
         var psi = new ProcessStartInfo
         {
             FileName = cppcheckExe,
@@ -258,6 +295,7 @@ public class CppcheckRunner
 
         var stderrBuilder = new StringBuilder();
         var stdoutBuilder = new StringBuilder();
+        string currentCheckingFile = Path.GetFileName(inputFiles[0]);
         int exitCode;
         using (var proc = new Process { StartInfo = psi })
         {
@@ -268,8 +306,37 @@ public class CppcheckRunner
             };
             proc.OutputDataReceived += (_, e) =>
             {
-                if (e.Data != null)
-                    stdoutBuilder.AppendLine(e.Data);
+                if (e.Data == null)
+                    return;
+
+                stdoutBuilder.AppendLine(e.Data);
+
+                var pctMatch = CppcheckPercentRegex.Match(e.Data);
+                if (pctMatch.Success && int.TryParse(pctMatch.Groups["pct"].Value, out int pctVal))
+                {
+                    currentCppcheckRatio = Math.Clamp(pctVal / 100.0, currentCppcheckRatio, 1.0);
+                    string doneStr = pctMatch.Groups["done"].Value;
+                    string totalStr = pctMatch.Groups["total"].Value;
+                    progress?.Report(new AnalysisProgressInfo(
+                        startPct + (cppcheckSpan * currentCppcheckRatio),
+                        $"Cppcheck 분석 중 ({doneStr}/{totalStr}): {currentCheckingFile}"));
+                    return;
+                }
+
+                var chkMatch = CppcheckCheckingRegex.Match(e.Data);
+                if (chkMatch.Success)
+                {
+                    string rawTarget = chkMatch.Groups["target"].Value.Trim();
+                    string shortTarget = Path.GetFileName(rawTarget);
+                    if (!string.IsNullOrEmpty(shortTarget))
+                        currentCheckingFile = shortTarget;
+
+                    // 한 파일 내에서 여러 #ifdef 분기를 검사할 때도 게이지가 미세하게 전진하도록 처리
+                    currentCppcheckRatio = Math.Min(0.95, currentCppcheckRatio + (0.18 / Math.Max(1, inputFiles.Count)));
+                    progress?.Report(new AnalysisProgressInfo(
+                        startPct + (cppcheckSpan * currentCppcheckRatio),
+                        $"Cppcheck 분석 중: {currentCheckingFile}"));
+                }
             };
 
             proc.Start();
@@ -306,9 +373,17 @@ public class CppcheckRunner
         }
 
         // 5. 생성된 .dump 파일 파싱 (라인별 검사 완료 / 미검사 판별 + C# 네이티브 MISRA / Narrowing 검출)
-        foreach (var srcFile in inputFiles)
+        double dumpSpan = endPct - cppcheckExecEndPct;
+        for (int i = 0; i < inputFiles.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            string srcFile = inputFiles[i];
+            string srcName = Path.GetFileName(srcFile);
+            double dumpRatio = (double)(i + 1) / inputFiles.Count;
+            progress?.Report(new AnalysisProgressInfo(
+                cppcheckExecEndPct + (dumpSpan * dumpRatio),
+                $"AST 및 MISRA 정밀 분석 중 ({i + 1}/{inputFiles.Count}): {srcName}"));
 
             string dumpFile = srcFile + ".dump";
             if (!dumpGuard.IsGeneratedByThisRun(dumpFile))
@@ -316,7 +391,7 @@ public class CppcheckRunner
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpMissing",
                     "AST 덤프 파일 미생성",
-                    $"[분석 범위 안내] '{Path.GetFileName(srcFile)}'의 AST 덤프(.dump) 파일이 생성되지 않아 라인별 검사 상태 표시와 C# 네이티브 MISRA/축소 변환 검사를 수행하지 못했습니다. 소스 폴더에 쓰기 권한이 있는지, 구문 오류가 없는지 확인하세요.",
+                    $"[분석 범위 안내] '{srcName}'의 AST 덤프(.dump) 파일이 생성되지 않아 라인별 검사 상태 표시와 C# 네이티브 MISRA/축소 변환 검사를 수행하지 못했습니다. 소스 폴더에 쓰기 권한이 있는지, 구문 오류가 없는지 확인하세요.",
                     srcFile));
                 continue;
             }
@@ -331,7 +406,7 @@ public class CppcheckRunner
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpParseError",
                     "AST 덤프 파일 해석 실패",
-                    $"[분석 범위 안내] '{Path.GetFileName(srcFile)}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 C# 네이티브 검사를 건너뛰었습니다. ({ex.Message})",
+                    $"[분석 범위 안내] '{srcName}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 C# 네이티브 검사를 건너뛰었습니다. ({ex.Message})",
                     srcFile));
                 continue;
             }
@@ -535,9 +610,44 @@ public class CppcheckRunner
                 continue;
             }
 
-            // 2) 검사 대상 파일에 속하지 않은 결함은 제외
+            // 2) 검사 대상 파일에 속하지 않은 결함은 제외하되,
+            //    비대상(참조) 헤더에서 #error(preprocessorErrorDirective)나 구문 오류(syntaxError/internalAstError)가 발생하면
+            //    이를 포함한 검사 대상(.c) 파일 전체가 [미검사]로 빠지므로 원인 파악을 위해 반드시 노트 탭에 안내
             if (string.IsNullOrEmpty(file) || !targetFilesNormalized.Contains(AnalysisIssue.NormalizePath(file)))
+            {
+                if (id.Equals("preprocessorErrorDirective", StringComparison.OrdinalIgnoreCase) ||
+                    id.Equals("syntaxError", StringComparison.OrdinalIgnoreCase) ||
+                    id.Equals("internalAstError", StringComparison.OrdinalIgnoreCase))
+                {
+                    string normErrFile = AnalysisIssue.NormalizePath(file);
+                    string noteKey = $"{id}|{normErrFile}|{line}|{rawMsg}";
+                    if (keys.NoteKeys.Add(noteKey))
+                    {
+                        string errTitle = id.Equals("preprocessorErrorDirective", StringComparison.OrdinalIgnoreCase)
+                            ? "참조 헤더 전처리기 #error 발생 (분석 중단 원인)"
+                            : "참조 헤더 구문 해석 오류 (분석 중단 원인)";
+
+                        string errGuide = id.Equals("preprocessorErrorDirective", StringComparison.OrdinalIgnoreCase)
+                            ? $"[전처리기 #error 중단 안내] 참조 헤더 '{Path.GetFileName(file)}' ({line}번째 줄)에서 '{rawMsg}' 오류가 발생하여 이를 포함한 소스 파일이 미검사 처리되었습니다. 타겟 프로세서 설정이 해당 헤더의 아키텍처와 맞는지 확인하거나 상단 [-D 매크로]에 필요한 매크로를 추가하세요."
+                            : $"[참조 헤더 구문 오류 안내] 참조 헤더 '{Path.GetFileName(file)}' ({line}번째 줄)에서 구문 오류({rawMsg})가 발생하여 이를 포함한 소스 파일 분석이 중단되었습니다. 컴파일러 전용 비표준 키워드나 매크로를 상단 [-D 매크로]에 정의하세요.";
+
+                        result.NotesAndInfos.Add(new AnalysisIssue
+                        {
+                            RuleId = id,
+                            Category = "포함 파일 / 환경 안내",
+                            Severity = "Error",
+                            Obligation = "참고(Note)",
+                            Title = errTitle,
+                            Message = errGuide,
+                            FilePath = string.IsNullOrEmpty(file) ? string.Empty : Path.GetFullPath(file),
+                            Line = line,
+                            Column = col,
+                            IsInfoOrNote = true
+                        });
+                    }
+                }
                 continue;
+            }
 
             // 2-1) 초기화되지 않은 값 사용은 MISRA 9.1로도 보고 (원래 Cppcheck ID의 ON/OFF와 무관하게 9.1 규칙 설정을 따름)
             if (Misra91SourceIds.Contains(id) &&

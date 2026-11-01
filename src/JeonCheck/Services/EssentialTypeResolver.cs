@@ -27,7 +27,7 @@ public readonly record struct EssentialType(EssentialCategory Category, int Bits
 }
 
 /// <summary>
-/// Cppcheck misra.py의 getEssentialType() 로직을 C#으로 변환한 필수 타입 계산기.
+/// Cppcheck misra.py의 getEssentialType() / getEssentialTypeCategory() 로직을 C#으로 변환한 필수 타입 계산기.
 /// C 언어의 정수 승격(int promotion) 결과 타입이 아니라 MISRA가 정의한 필수 타입을 계산하므로,
 /// 예를 들어 'uint8_t + uint8_t'는 signed int가 아닌 unsigned char(8-bit)로 판정된다.
 /// 판정할 수 없는 수식은 null을 반환하며, 호출 측은 null이면 검사를 생략하여 오탐을 피한다.
@@ -62,7 +62,7 @@ public static class EssentialTypeResolver
 
         // 캐스트: 캐스트 대상 타입
         if (expr.IsCast)
-            return FromValueType(expr, platform, IsPlainCharType(expr.Next));
+            return FromValueType(expr, platform, IsPlainCharCast(expr.Next));
 
         switch (expr.Str)
         {
@@ -87,14 +87,6 @@ public static class EssentialTypeResolver
             if (expr.AstOperand1.ValuePointer > 0 || expr.AstOperand2.ValuePointer > 0)
                 return null;
 
-            // 정수 상수 수식은 계산된 값으로 필수 타입 결정 (예: 1U << 12 → unsigned short)
-            if (expr.Str != ":" && IsIntegerValueType(expr) && TryEvalConstInt(expr, out long constValue))
-            {
-                var byValue = FromValue(constValue, expr.ValueSign != "unsigned", platform);
-                if (byValue != null)
-                    return byValue;
-            }
-
             var e1 = Resolve(expr.AstOperand1, platform);
             var e2 = Resolve(expr.AstOperand2, platform);
             if (e1 == null || e2 == null)
@@ -102,16 +94,46 @@ public static class EssentialTypeResolver
 
             // 시프트 연산의 필수 타입은 좌변 피연산자의 필수 타입
             if (expr.Str is "<<" or ">>")
+            {
+                if (IsIntegerValueType(expr) &&
+                    e1.Value.IsSignedOrUnsigned &&
+                    TryEvalConstInt(expr, out long shiftConstVal))
+                {
+                    var byShiftVal = FromValue(shiftConstVal, e1.Value.Category == EssentialCategory.Signed, platform);
+                    if (byShiftVal != null)
+                        return byShiftVal;
+                }
                 return e1;
+            }
 
-            return e2.Value.Bits >= e1.Value.Bits ? e2 : e1;
+            // misra.py getEssentialType(767~773행)과 동일:
+            // 양쪽 피연산자의 부호 범주가 같을 때만 정수 상수 수식을 값 기반 최소 타입으로 축소
+            if (expr.Str != ":" &&
+                e1.Value.Category == e2.Value.Category &&
+                e1.Value.IsSignedOrUnsigned &&
+                IsIntegerValueType(expr) &&
+                TryEvalConstInt(expr, out long constValue))
+            {
+                var byValue = FromValue(constValue, e1.Value.Category == EssentialCategory.Signed, platform);
+                if (byValue != null)
+                    return byValue;
+            }
+
+            if (e1.Value.Bits != e2.Value.Bits)
+                return e2.Value.Bits > e1.Value.Bits ? e2 : e1;
+
+            // 비트 폭이 같고 한쪽이 Unsigned이면 C 표준 산술 변환과 동일하게 Unsigned 우선
+            if (e1.Value.Category == EssentialCategory.Unsigned)
+                return e1;
+            return e2;
         }
 
-        // 함수 호출 결과(반환형), 배열 요소, 구조체 멤버, 포인터 역참조, 대입식: 해당 토큰의 값 타입
+        // 함수 호출 결과(반환형), 배열 요소, 구조체 멤버, 포인터 역참조, 대입식:
+        // misra.py getEssentialTypeCategory(642~654행)와 동일하게 '.', '[', '*'를 언래핑하여 일반 char 여부를 판정
         bool isFunctionCall = expr.Str == "(" && expr.AstOperand1 != null && expr.AstOperand1.Type == "name";
         bool isDeref = expr.Str == "*" && expr.AstOperand2 == null;
         if (isFunctionCall || isDeref || expr.Str is "[" or "." || expr.IsAssignmentOp)
-            return FromValueType(expr, platform, isPlainChar: false);
+            return FromValueType(expr, platform, isPlainChar: IsPlainCharExpr(expr));
 
         // 열거형 상수 등 판정 불가 항목은 오탐 방지를 위해 null (misra.py와 동일)
         return null;
@@ -336,11 +358,55 @@ public static class EssentialTypeResolver
     }
 
     /// <summary>
+    /// misra.py getEssentialTypeCategory(642~654행)와 동일:
+    /// 배열 인덱싱('['), 포인터 역참조('*'), 구조체 멤버 접근('.')을 언래핑하여
+    /// 기저 변수의 선언 타입이 signed/unsigned가 없는 일반 'char'인지 확인
+    /// </summary>
+    private static bool IsPlainCharExpr(DumpToken? expr)
+    {
+        var vartok = expr;
+        while (vartok != null)
+        {
+            if (vartok.Str == "[" || (vartok.Str == "*" && vartok.AstOperand2 == null))
+            {
+                vartok = vartok.AstOperand1;
+            }
+            else if (vartok.Str == ".")
+            {
+                vartok = vartok.AstOperand2;
+            }
+            else if (vartok.IsAssignmentOp)
+            {
+                vartok = vartok.AstOperand1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (vartok?.Variable != null)
+            return IsPlainCharType(vartok.Variable.TypeStartToken);
+
+        return false;
+    }
+
+    /// <summary>
     /// 타입 선언 토큰열에서 signed/unsigned가 명시되지 않은 일반 'char'인지 확인 (misra.py와 동일한 판정)
     /// </summary>
     private static bool IsPlainCharType(DumpToken? typeTok)
     {
         for (var tok = typeTok; tok != null && tok.Type == "name"; tok = tok.Next)
+        {
+            if (tok.Str == "char")
+                return !tok.IsSigned && !tok.IsUnsigned;
+        }
+        return false;
+    }
+
+    private static bool IsPlainCharCast(DumpToken? castTok)
+    {
+        for (var tok = castTok; tok != null && (tok.Type == "name" || tok.Str == "*"); tok = tok.Next)
         {
             if (tok.Str == "char")
                 return !tok.IsSigned && !tok.IsUnsigned;

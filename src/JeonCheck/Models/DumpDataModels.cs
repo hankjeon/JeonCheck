@@ -82,6 +82,7 @@ public class DumpToken
     public int ValuePointer { get; set; }
     public int ValueConstness { get; set; }
     public int ValueVolatileness { get; set; }
+    public string ValueTypeScopeId { get; set; } = string.Empty;
     public string? OriginalTypeName { get; set; }
 
     public DumpToken? Next { get; set; }

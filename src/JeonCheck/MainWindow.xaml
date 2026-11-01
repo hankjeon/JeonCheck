@@ -8,8 +8,110 @@
         MinWidth="1024" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Closing="MainWindow_Closing"
+        PreviewKeyDown="MainWindow_PreviewKeyDown"
         Background="#1E1E1E"
         Foreground="#E6EDF3">
+    <Window.Resources>
+        <Style x:Key="DarkTopMenuItemStyle" TargetType="MenuItem">
+            <Setter Property="Foreground" Value="#E6EDF3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+                                <Popup x:Name="PART_Popup"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Placement="Bottom"
+                                       AllowsTransparency="True"
+                                       Focusable="False"
+                                       PopupAnimation="Fade">
+                                    <Border Background="#252526" BorderBrush="#454545" BorderThickness="1" Padding="2" MinWidth="220">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#3E3E42" />
+                            </Trigger>
+                            <Trigger Property="IsSubmenuOpen" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#3E3E42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkSubMenuItemStyle" TargetType="MenuItem">
+            <Setter Property="Foreground" Value="#E6EDF3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="2">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter Grid.Column="0" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" Margin="0,0,24,0" />
+                                <TextBlock x:Name="GestureText" Grid.Column="1" Text="{TemplateBinding InputGestureText}" Foreground="#8B949E" FontSize="11.5" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SubmenuArrow" Grid.Column="1" Text="▸" Foreground="#8B949E" FontSize="12" VerticalAlignment="Center" Visibility="Collapsed" />
+                                <Popup x:Name="PART_Popup"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Placement="Right"
+                                       HorizontalOffset="-2"
+                                       AllowsTransparency="True"
+                                       Focusable="False"
+                                       PopupAnimation="Fade">
+                                    <Border Background="#252526" BorderBrush="#454545" BorderThickness="1" Padding="2" MinWidth="280">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="GestureText" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#094771" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter TargetName="SubmenuArrow" Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsSubmenuOpen" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#094771" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter TargetName="SubmenuArrow" Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#6E7681" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkMenuSeparatorStyle" TargetType="Separator">
+            <Setter Property="Margin" Value="6,3" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="#3E3E42" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,13 +119,34 @@
             <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
-        <!-- 1. 상단 2단 툴바 (1단: 프로젝트 관리 및 실행 버튼 / 2단: 타겟 프로세서 및 전처리 설정) -->
+        <!-- 1. 상단 표준 메뉴바 (파일 / 도움말) + 분석 옵션 및 실행 툴바 -->
         <Border Grid.Row="0" Background="#2D2D30" BorderBrush="#3E3E42" BorderThickness="0,0,0,1">
             <StackPanel>
-                <!-- 1단: 좌측 프로젝트 버튼 + 우측 규칙 설정 및 정적 분석 시작 버튼 (항상 우측 고정) -->
-                <Border Padding="10,6" BorderBrush="#38383D" BorderThickness="0,0,0,1">
+                <!-- 1.1 표준 메뉴바: 파일(F) | 도움말(H) -->
+                <Border Background="#2D2D30" BorderBrush="#38383D" BorderThickness="0,0,0,1" Padding="4,1">
+                    <Menu Background="Transparent" Foreground="#E6EDF3" FontSize="12.5">
+                        <MenuItem Header="파일(_F)" Style="{StaticResource DarkTopMenuItemStyle}" SubmenuOpened="FileMenu_SubmenuOpened">
+                            <MenuItem Header="📄 새 프로젝트(_N)" InputGestureText="Ctrl+N" Style="{StaticResource DarkSubMenuItemStyle}" Click="NewProject_Click" />
+                            <MenuItem Header="📂 프로젝트 열기(_O)..." InputGestureText="Ctrl+O" Style="{StaticResource DarkSubMenuItemStyle}" Click="OpenProject_Click" />
+                            <MenuItem x:Name="RecentProjectsMenuItem" Header="🕒 최근 사용한 프로젝트(_R)" Style="{StaticResource DarkSubMenuItemStyle}" />
+                            <Separator Style="{StaticResource DarkMenuSeparatorStyle}" />
+                            <MenuItem Header="💾 저장(_S)" InputGestureText="Ctrl+S" Style="{StaticResource DarkSubMenuItemStyle}" Click="SaveProject_Click" />
+                            <MenuItem Header="💾 다른 이름으로 저장(_A)..." InputGestureText="Ctrl+Shift+S" Style="{StaticResource DarkSubMenuItemStyle}" Click="SaveProjectAs_Click" />
+                            <Separator Style="{StaticResource DarkMenuSeparatorStyle}" />
+                            <MenuItem Header="🧪 샘플 프로젝트 로드(_L)" Style="{StaticResource DarkSubMenuItemStyle}" Click="LoadSample_Click" />
+                            <Separator Style="{StaticResource DarkMenuSeparatorStyle}" />
+                            <MenuItem Header="종료(_X)" InputGestureText="Alt+F4" Style="{StaticResource DarkSubMenuItemStyle}" Click="ExitApp_Click" />
+                        </MenuItem>
+                        <MenuItem Header="도움말(_H)" Style="{StaticResource DarkTopMenuItemStyle}">
+                            <MenuItem Header="ℹ️ 전검사 정보(_A)..." Style="{StaticResource DarkSubMenuItemStyle}" Click="OpenAboutWindow_Click" />
+                        </MenuItem>
+                    </Menu>
+                </Border>
+
+                <!-- 1.2 분석 옵션 및 정적 분석 시작 툴바 (방안 A: 깔끔한 1단 통합) -->
+                <Border Background="#252528" Padding="12,6">
                     <DockPanel>
-                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,0">
                             <Button Content="{Binding RulesetButtonText}"
                                     Style="{StaticResource DarkButtonStyle}"
                                     Click="OpenRulesetWindow_Click"
@@ -34,73 +157,60 @@
                                     Click="CancelAnalysis_Click"
                                     ToolTip="진행 중인 정적 분석을 중지합니다 (실행 중인 분석 도구 프로세스를 종료하고 임시 파일을 정리합니다)"
                                     Margin="0,0,8,0" />
-                            <Button Content="▶ 정적 분석 시작"
+                            <Button Content="{Binding RunButtonText}"
                                     Style="{StaticResource PrimaryRunButtonStyle}"
                                     IsEnabled="{Binding CanAnalyze}"
                                     Click="RunAnalysis_Click" />
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="📄 새 프로젝트" Style="{StaticResource DarkButtonStyle}" Click="NewProject_Click" ToolTip="작업 공간을 초기화합니다" />
-                            <Button Content="📂 열기" Style="{StaticResource DarkButtonStyle}" Click="OpenProject_Click" ToolTip="저장된 프로젝트(*.jcproj)를 불러옵니다" />
-                            <Button Content="💾 저장" Style="{StaticResource DarkButtonStyle}" Click="SaveProject_Click" ToolTip="현재 파일 구성, 타겟, 룰셋을 프로젝트(*.jcproj)로 저장합니다" />
-                            <Border Width="1" Background="#4E5157" Margin="8,3" />
-                            <Button Content="🧪 샘플 로드" Style="{StaticResource DarkButtonStyle}" Click="LoadSample_Click" ToolTip="내장된 임베디드 C 샘플 코드를 불러옵니다" />
-                            <Border Width="1" Background="#4E5157" Margin="8,3" />
-                            <Button Content="ℹ️ 정보" Style="{StaticResource DarkButtonStyle}" Click="OpenAboutWindow_Click" ToolTip="프로그램 정보 및 제작자 안내" />
-                        </StackPanel>
-                    </DockPanel>
-                </Border>
+                        <WrapPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
+                                <TextBlock Text="🎯 타겟 프로세서:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" FontWeight="SemiBold" />
+                                <ComboBox ItemsSource="{Binding TargetPresets}"
+                                          SelectedItem="{Binding SelectedTargetPreset}"
+                                          DisplayMemberPath="Name"
+                                          Width="275"
+                                          VerticalAlignment="Center"
+                                          ToolTip="{Binding SelectedTargetPreset.Description}" />
+                            </StackPanel>
 
-                <!-- 2단: 타겟 프로세서, C 표준, -D 매크로, #ifdef 강제 검사 옵션 -->
-                <Border Background="#252528" Padding="12,5">
-                    <WrapPanel VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
-                            <TextBlock Text="🎯 타겟 프로세서:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" FontWeight="SemiBold" />
-                            <ComboBox ItemsSource="{Binding TargetPresets}"
-                                      SelectedItem="{Binding SelectedTargetPreset}"
-                                      DisplayMemberPath="Name"
-                                      Width="290"
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
+                                <TextBlock Text="C 표준:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                <ComboBox ItemsSource="{Binding CStandards}"
+                                          SelectedItem="{Binding SelectedCStandard}"
+                                          Width="72"
+                                          VerticalAlignment="Center" />
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
+                                <TextBlock Text="-D 매크로:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                <TextBox Text="{Binding CustomDefines, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="165"
+                                         VerticalAlignment="Center"
+                                         Padding="5,3"
+                                         Background="#1E1E1E"
+                                         Foreground="#E6EDF3"
+                                         BorderBrush="#4E5157"
+                                         FontFamily="{StaticResource CodingFont}"
+                                         ToolTip="추가 매크로 정의 (예: ENABLE_EXPERIMENTAL_LUT=1, BOARD_V2)" />
+                            </StackPanel>
+
+                            <CheckBox Content="모든 #ifdef 분기 강제 검사 (--force)"
+                                      IsChecked="{Binding ForceAllIfdefConfigs}"
+                                      Foreground="#E6EDF3"
                                       VerticalAlignment="Center"
-                                      ToolTip="{Binding SelectedTargetPreset.Description}" />
-                        </StackPanel>
+                                      Margin="0,2,18,2"
+                                      ToolTip="체크 시 정의되지 않은 #ifdef 블록까지 모든 조합(--force)을 강제로 분석합니다." />
 
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
-                            <TextBlock Text="C 표준:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
-                            <ComboBox ItemsSource="{Binding CStandards}"
-                                      SelectedItem="{Binding SelectedCStandard}"
-                                      Width="72"
-                                      VerticalAlignment="Center" />
-                        </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,18,2">
-                            <TextBlock Text="-D 매크로:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
-                            <TextBox Text="{Binding CustomDefines, UpdateSourceTrigger=PropertyChanged}"
-                                     Width="180"
-                                     VerticalAlignment="Center"
-                                     Padding="5,3"
-                                     Background="#1E1E1E"
-                                     Foreground="#E6EDF3"
-                                     BorderBrush="#4E5157"
-                                     FontFamily="{StaticResource CodingFont}"
-                                     ToolTip="추가 매크로 정의 (예: ENABLE_EXPERIMENTAL_LUT=1, BOARD_V2)" />
-                        </StackPanel>
-
-                        <CheckBox Content="모든 #ifdef 분기 강제 검사 (--force)"
-                                  IsChecked="{Binding ForceAllIfdefConfigs}"
-                                  Foreground="#E6EDF3"
-                                  VerticalAlignment="Center"
-                                  Margin="0,2,18,2"
-                                  ToolTip="체크 시 정의되지 않은 #ifdef 블록까지 모든 조합(--force)을 강제로 분석합니다." />
-
-                        <CheckBox Content="Clang-Tidy (CERT-C / 심층 분석) 포함"
-                                  IsChecked="{Binding EnableClangTidy}"
-                                  Foreground="#79C0FF"
-                                  FontWeight="SemiBold"
-                                  VerticalAlignment="Center"
-                                  Margin="0,2,0,2"
-                                  ToolTip="Cppcheck 외에 내장된 Clang-Tidy 엔진을 함께 실행하여 CERT-C, bugprone, Clang Static Analyzer 경로 추적 검사를 수행합니다." />
-                    </WrapPanel>
+                            <CheckBox Content="Clang-Tidy (CERT-C / 심층 분석) 포함"
+                                      IsChecked="{Binding EnableClangTidy}"
+                                      Foreground="#79C0FF"
+                                      FontWeight="SemiBold"
+                                      VerticalAlignment="Center"
+                                      Margin="0,2,0,2"
+                                      ToolTip="Cppcheck 외에 내장된 Clang-Tidy 엔진을 함께 실행하여 CERT-C, bugprone, Clang Static Analyzer 경로 추적 검사를 수행합니다." />
+                        </WrapPanel>
+                    </DockPanel>
                 </Border>
             </StackPanel>
         </Border>
@@ -249,9 +359,17 @@
                         </DockPanel>
                     </Border>
 
-                    <!-- 라인별 검사 상태 표시 코드 리스트 -->
-                    <ListBox x:Name="CodeViewerListBox"
-                             ItemsSource="{Binding CurrentFileLines}"
+                    <!-- 코드 리스트 + 우측 결함 위치 오버뷰 바 (오류/경고/권고 3색 마커 & 클릭 즉시 스크롤) -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 라인별 검사 상태 표시 코드 리스트 -->
+                        <ListBox x:Name="CodeViewerListBox"
+                                 Grid.Column="0"
+                                 ItemsSource="{Binding CurrentFileLines}"
                              Background="#1E1E1E"
                              BorderThickness="0"
                              FontFamily="{StaticResource CodingFont}"
@@ -361,6 +479,15 @@
                                         <Setter TargetName="AnnotationBadge" Property="Background" Value="#2E2240" />
                                         <Setter TargetName="AnnotationText" Property="Foreground" Value="#D2A8FF" />
                                     </DataTrigger>
+                                    <!-- 🔵 권고(Style/Advisory) 규칙 위반 검출 줄 -->
+                                    <DataTrigger Binding="{Binding Status}" Value="Advisory">
+                                        <Setter TargetName="StatusIndicatorBar" Property="Background" Value="#58A6FF" />
+                                        <Setter TargetName="StatusDot" Property="Fill" Value="#58A6FF" />
+                                        <Setter TargetName="LineBgBorder" Property="Background" Value="#142334" />
+                                        <Setter TargetName="AnnotationBadge" Property="Background" Value="#18324C" />
+                                        <Setter TargetName="AnnotationText" Property="Foreground" Value="#79C0FF" />
+                                        <Setter TargetName="AnnotationText" Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
                                     <!-- 🟠 경고/규칙 위반 검출 줄 -->
                                     <DataTrigger Binding="{Binding Status}" Value="Warning">
                                         <Setter TargetName="StatusIndicatorBar" Property="Background" Value="#D29922" />
@@ -382,7 +509,21 @@
                                 </DataTemplate.Triggers>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
-                    </ListBox>
+                        </ListBox>
+
+                        <!-- 우측 결함 위치 오버뷰 마커 바 (🔴오류 / 🟠경고 / 🔵권고) -->
+                        <Border Grid.Column="1"
+                                Background="#18181A"
+                                BorderBrush="#2D2D30"
+                                BorderThickness="1,0,0,0"
+                                Cursor="Hand"
+                                ToolTip="전체 코드 결함 위치 미니맵 (🔴오류 / 🟠경고 / 🔵권고 - 클릭하면 해당 줄로 바로 이동합니다)"
+                                SizeChanged="OverviewCanvas_SizeChanged"
+                                MouseLeftButtonDown="OverviewCanvas_MouseLeftButtonDown"
+                                MouseMove="OverviewCanvas_MouseMove">
+                            <Canvas x:Name="OverviewCanvas" ClipToBounds="True" Background="Transparent" />
+                        </Border>
+                    </Grid>
                 </DockPanel>
 
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#3E3E42" />
@@ -502,7 +643,24 @@
 
                     <!-- 탭 2: 노트 / 누락 헤더 안내 -->
                     <TabItem Header="{Binding NotesTabHeader}">
-                        <DataGrid ItemsSource="{Binding NotesAndInfos}"
+                        <DockPanel Background="#1E1E1E">
+                            <Border DockPanel.Dock="Top" Background="#252526" Padding="8,5" BorderBrush="#333337" BorderThickness="0,0,0,1">
+                                <DockPanel>
+                                    <Button Content="🔍 폴더에서 누락 헤더 일괄 검색 및 참조 추가..."
+                                            DockPanel.Dock="Right"
+                                            Style="{StaticResource DarkButtonStyle}"
+                                            Padding="10,2"
+                                            FontWeight="SemiBold"
+                                            Click="SearchAllMissingHeaders_Click"
+                                            ToolTip="상위 폴더를 선택하면 하위 모든 폴더를 탐색하여 누락된 헤더들을 찾아 참조 코드(비대상)에 한꺼번에 추가합니다." />
+                                    <TextBlock Text="누락된 포함 파일(#include) 행에서 우클릭하거나 우측 버튼을 눌러 하위 폴더에서 헤더를 일괄 검색해 참조 코드에 추가할 수 있습니다."
+                                               VerticalAlignment="Center"
+                                               Foreground="#9DA7B3" />
+                                </DockPanel>
+                            </Border>
+
+                            <DataGrid x:Name="NotesDataGrid"
+                                      ItemsSource="{Binding NotesAndInfos}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   Background="#1E1E1E"
@@ -515,6 +673,12 @@
                                   HeadersVisibility="Column"
                                   RowHeaderWidth="0"
                                   SelectionChanged="NotesDataGrid_SelectionChanged">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="🔍 모든 누락 헤더를 폴더에서 일괄 검색하여 참조 코드에 추가..." Click="SearchAllMissingHeaders_Click" />
+                                        <MenuItem Header="🔍 선택한 줄의 누락 헤더만 폴더에서 검색하여 참조 코드에 추가..." Click="SearchSelectedMissingHeader_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
                             <DataGrid.Resources>
                                 <Style TargetType="DataGridColumnHeader">
                                     <Setter Property="Background" Value="#2D2D30" />
@@ -530,7 +694,8 @@
                                 <DataGridTextColumn Header="라인" Binding="{Binding Line}" Width="60" />
                                 <DataGridTextColumn Header="상세 참고 안내" Binding="{Binding Message}" Width="*" />
                             </DataGrid.Columns>
-                        </DataGrid>
+                            </DataGrid>
+                        </DockPanel>
                     </TabItem>
 
                     <!-- 탭 3: 예외(무시) 처리된 항목 -->

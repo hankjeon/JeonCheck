@@ -55,12 +55,13 @@
             </Setter>
         </Style>
 
-        <!-- 강조 실행 버튼 스타일 -->
+        <!-- 강조 실행 버튼 스타일 (분석 중 녹색 진행률 게이지 차오름 지원) -->
         <Style x:Key="PrimaryRunButtonStyle" TargetType="Button" BasedOn="{StaticResource DarkButtonStyle}">
             <Setter Property="Background" Value="#238636" />
             <Setter Property="BorderBrush" Value="#2EA043" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="Padding" Value="14,5" />
+            <Setter Property="MinWidth" Value="155" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -69,16 +70,37 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="4"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                ClipToBounds="True">
+                            <Grid>
+                                <!-- 분석 진행 중일 때 왼쪽에서 오른쪽으로 녹색이 차오르는 ProgressBar -->
+                                <ProgressBar x:Name="progressFill"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding AnalysisProgressPercent, Mode=OneWay}"
+                                             Background="#122618"
+                                             Foreground="#2EA043"
+                                             BorderThickness="0"
+                                             Visibility="Collapsed" />
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="border" Property="Background" Value="#2EA043" />
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
+                            <DataTrigger Binding="{Binding IsAnalyzing}" Value="True">
+                                <Setter TargetName="progressFill" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="#3FB950" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsEnabled}" Value="False" />
+                                    <Condition Binding="{Binding IsAnalyzing}" Value="False" />
+                                </MultiDataTrigger.Conditions>
                                 <Setter Property="Opacity" Value="0.5" />
-                            </Trigger>
+                            </MultiDataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>

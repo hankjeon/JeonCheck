@@ -62,4 +62,69 @@ public static class ProcessHelper
 
         return lines.Count == 0 ? string.Empty : "원문: " + string.Join(" / ", lines);
     }
+
+    /// <summary>
+    /// 사용자 입력 -D 매크로 문자열을 개별 매크로 정의(NAME 또는 NAME=VALUE) 목록으로 분리한다.
+    /// 세미콜론(;), 쉼표(,) 구분자를 지원하며, 공백 구분 시에도 'long int' 같은 다중 단어 타입 값을 보존한다.
+    /// </summary>
+    public static List<string> ParseCustomDefines(string customDefines)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(customDefines))
+            return result;
+
+        // ; 또는 , 가 포함되어 있으면 해당 구분자를 우선 사용하여 공백 포함 매크로 값(예: __INTPTR_TYPE__=long int)을 그대로 유지
+        if (customDefines.Contains(';') || customDefines.Contains(','))
+        {
+            foreach (var part in customDefines.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string cleaned = CleanDefineToken(part);
+                if (!string.IsNullOrWhiteSpace(cleaned))
+                    result.Add(cleaned);
+            }
+            return result;
+        }
+
+        // 공백으로만 구분된 경우: C 타입 키워드(int, long, short, char, signed, unsigned)가 이전 'NAME=...' 뒤에 이어지면 하나로 결합
+        var rawTokens = customDefines.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var raw in rawTokens)
+        {
+            string cleaned = CleanDefineToken(raw);
+            if (string.IsNullOrWhiteSpace(cleaned))
+                continue;
+
+            if (result.Count > 0 &&
+                result[^1].Contains('=') &&
+                !raw.StartsWith("-D", StringComparison.Ordinal) &&
+                !cleaned.Contains('=') &&
+                IsCTypeContinuationWord(cleaned))
+            {
+                result[^1] = result[^1] + " " + cleaned;
+            }
+            else
+            {
+                result.Add(cleaned);
+            }
+        }
+
+        return result;
+    }
+
+    private static string CleanDefineToken(string token)
+    {
+        string cleaned = token.Trim().Trim('"');
+        if (cleaned.StartsWith("-D", StringComparison.Ordinal))
+            cleaned = cleaned.Substring(2).Trim().Trim('"');
+        return cleaned;
+    }
+
+    private static bool IsCTypeContinuationWord(string word)
+    {
+        return word.Equals("int", StringComparison.OrdinalIgnoreCase) ||
+               word.Equals("long", StringComparison.OrdinalIgnoreCase) ||
+               word.Equals("short", StringComparison.OrdinalIgnoreCase) ||
+               word.Equals("char", StringComparison.OrdinalIgnoreCase) ||
+               word.Equals("signed", StringComparison.OrdinalIgnoreCase) ||
+               word.Equals("unsigned", StringComparison.OrdinalIgnoreCase);
+    }
 }
