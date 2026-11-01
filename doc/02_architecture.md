@@ -90,3 +90,27 @@ Clang-Tidy 축소 변환은 `implicitNarrowing`으로, 실수 루프 카운터 �
 미등록 진단은 `RuleInfo.CreateUnregistered`가 공통 한글 안내를 생성하고, `RefreshFilteredDefects`가 발견한 ID를 런타임 `AllRules`에 기본 ON으로 추가합니다. 이 등록을 필터 적용보다 먼저 수행하여 결함 목록과 요약에 표시합니다. 개별 원문은 각 `AnalysisIssue.Message`에 유지하고 공통 규칙 해설에 첫 원문을 고정하지 않습니다.
 
 미등록 규칙도 룰셋 ON/OFF 및 프로젝트 저장 ID 목록을 사용합니다. 프로젝트 로드 시 DB에 없는 저장 ID를 임시 규칙으로 복원하므로 OFF 선택이 다음 분석에도 적용됩니다. 이 과정은 `rules_ko.json`을 쓰지 않습니다. DB에 새로 한글 등록한 ID는 다음 앱 초기화 시 정식 설명을 사용합니다.
+
+## Ubuntu PySide6 앱 (`pyapp/`)
+
+Windows 앱과 같은 데이터(`data/`)와 프로젝트 파일 형식을 사용하며, 분석 흐름(포함 경로 준비 → Cppcheck XML·dump → 병합 → 선택적 Clang-Tidy)과 필터·예외·요약 규칙도 같습니다. 차이는 dump 해석 단계입니다.
+
+```mermaid
+flowchart TD
+    UI[PySide6 MainWindow] --> State[AppState: 필터·예외·룰셋·프로젝트]
+    State --> Runner[engine/runner.py]
+    Runner --> CPP[apt Cppcheck: XML + dump]
+    CPP --> Misra[설치된 addon의 misra.py --cli]
+    CPP --> Worker[dump_worker.py: 줄 커버리지 + 자체 검사 4종]
+    Runner --> CT[Clang-Tidy]
+    Misra --> Merge[위치 중복 제거 + 한글 해설 연결]
+    Worker --> Merge
+    CT --> Merge
+    Merge --> State
+```
+
+- **MISRA:** C# 분석기 대신 설치된 Cppcheck와 같은 버전의 `misra.py`를 dump마다 `--cli`로 실행합니다. 검출되는 모든 규칙을 `misra-c2012-X.Y` ID로 보고하며, `rules_ko.json`에 없는 규칙은 미등록 진단 흐름으로 표시합니다. 9.1은 Windows 앱과 같이 Cppcheck `uninitvar` 계열을 매핑합니다.
+- **자체 검사:** `dump_worker.py`가 `cppcheckdata`로 dump를 읽어 `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`를 검사합니다. 필수 타입은 `misra.getEssentialType()`을 사용하고, 함수 호출 결과·배열 요소·멤버·역참조·대입식은 토큰 값 타입으로 보완합니다. 상수 값은 Cppcheck의 known value를 사용합니다.
+- **커버리지:** 같은 규칙(`tokenlist` 줄 = 분석됨, `rawtokens`에만 있는 코드 줄 = 미검사, 지시문 줄 제외)으로 계산합니다.
+- **경로:** Linux에서는 경로의 대소문자를 구분합니다. Windows에서 저장한 `*.jcproj`의 `\` 구분자는 읽을 때 변환합니다.
+- **취소:** 외부 도구를 별도 프로세스 그룹으로 실행하고 취소 시 그룹 전체를 종료합니다. dump 백업·복원 규칙은 Windows 앱과 같습니다.

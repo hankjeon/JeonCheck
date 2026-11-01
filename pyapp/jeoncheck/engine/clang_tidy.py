@@ -1,0 +1,170 @@
+"""선택적 Clang-Tidy 분석 (CERT-C / bugprone / clang-analyzer). 누락 헤더는 임시 빈 헤더로 보완한다."""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import tempfile
+import threading
+
+from .. import paths
+from ..models import AnalysisIssue, RuleInfo, TargetPreset, make_position_key, normalize_path
+from .process import run_process, summarize_error_lines
+
+INCLUDE_QUOTE_RE = re.compile(r'^\s*#\s*include\s*["<]([^">]+)[" >]', re.MULTILINE)
+# Windows 드라이브 문자(C:)가 있어도 없어도 해석한다.
+DIAGNOSTIC_RE = re.compile(
+    r"^(?P<file>(?:[A-Za-z]:)?[^:\r\n]+):(?P<line>\d+):(?P<col>\d+):\s+(?P<sev>warning|error):\s+"
+    r"(?P<msg>.+?)\s+\[(?P<ids>[^\]]+)\]\s*$")
+
+
+def split_defines(custom_defines: str) -> list[str]:
+    result = []
+    for d in re.split(r"[,; ]+", custom_defines or ""):
+        d = d.strip()
+        if d.startswith("-D"):
+            d = d[2:]
+        if d:
+            result.append(d)
+    return result
+
+
+def run_clang_tidy(
+    exe: str,
+    preset: TargetPreset,
+    c_standard: str,
+    custom_defines: str,
+    input_files: list[str],
+    include_dirs: list[str],
+    target_files: set[str],
+    rules_by_id: dict[str, RuleInfo],
+    position_keys: set[str],
+    notes: list[AnalysisIssue],
+    cancel: threading.Event | None = None,
+) -> list[AnalysisIssue]:
+    if not input_files:
+        return []
+    stub_root = tempfile.mkdtemp(prefix="jeoncheck_stubs_")
+    # 상대 경로(../ 등)로 올라가는 #include도 임시 폴더 안에서 해석되도록 3단계 하위 폴더를 기준점으로 사용
+    stub_base = os.path.join(stub_root, "d0", "d1", "d2")
+    try:
+        os.makedirs(stub_base, exist_ok=True)
+        builtin_inc = str(paths.clang_tidy_include_directory())
+        _create_missing_header_stubs(input_files, include_dirs, builtin_inc, stub_root, stub_base)
+
+        args = [exe, "-checks=-*,bugprone-*,cert-*,clang-analyzer-*", "--quiet", *input_files, "--",
+                "-xc", f"-std={c_standard}", f"--target={preset.clang_target or 'armv7r-none-eabi'}", "-nostdinc"]
+        if os.path.isdir(builtin_inc):
+            args += ["-isystem", builtin_inc]
+        for inc in include_dirs:
+            args += ["-I", inc]
+        # 누락 헤더 더미 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
+        args += ["-I", stub_base]
+        args += [f"-D{d.strip()}" for d in preset.defines if d.strip()]
+        args += [f"-D{d}" for d in split_defines(custom_defines)]
+        args.append("-Wno-everything")
+
+        code, out, err = run_process(args, cwd=str(paths.root_directory()), cancel=cancel)
+        output = out + "\n" + err
+        issues = parse_clang_tidy_output(output, target_files, rules_by_id, position_keys)
+        if code != 0:
+            notes.append(AnalysisIssue(
+                rule_id="clangTidyExit", category="포함 파일 / 환경 안내", severity="Info", obligation="참고(Note)",
+                title="Clang-Tidy 비정상 종료 안내",
+                message=(f"[Clang-Tidy 안내] Clang-Tidy가 종료 코드 {code}(으)로 끝났습니다. 컴파일 오류가 있는 파일은 "
+                         f"Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {summarize_error_lines(output)}").strip(),
+                is_info_or_note=True))
+        return issues
+    finally:
+        shutil.rmtree(stub_root, ignore_errors=True)
+
+
+def _find_header(inc: str, current_dir: str, include_dirs: list[str], builtin_inc: str) -> str | None:
+    for d in [current_dir, *include_dirs, builtin_inc]:
+        if d:
+            cand = os.path.join(d, inc)
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+    return None
+
+
+def _create_missing_header_stubs(input_files, include_dirs, builtin_inc, stub_root, stub_base) -> None:
+    queue = list(input_files)
+    scanned: set[str] = set()
+    prefix = os.path.abspath(stub_root).rstrip(os.sep) + os.sep
+    while queue:
+        current = queue.pop(0)
+        if not os.path.isfile(current) or current in scanned:
+            continue
+        scanned.add(current)
+        try:
+            with open(current, encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        for m in INCLUDE_QUOTE_RE.finditer(content):
+            inc = m.group(1).strip()
+            if not inc:
+                continue
+            found = _find_header(inc, os.path.dirname(current), include_dirs, builtin_inc)
+            if found:
+                queue.append(found)
+                continue
+            rel = inc.replace("/", os.sep).replace("\\", os.sep)
+            # 절대 경로 #include는 더미 생성 대상에서 제외 (사용자 디스크에 파일을 만들지 않음)
+            if os.path.isabs(rel):
+                continue
+            stub = os.path.normpath(os.path.join(stub_base, rel))
+            if not stub.startswith(prefix):
+                continue  # 임시 더미 폴더 밖으로 벗어나면 생성하지 않음
+            os.makedirs(os.path.dirname(stub), exist_ok=True)
+            if not os.path.exists(stub):
+                with open(stub, "w", encoding="utf-8") as fh:
+                    fh.write("/* Auto-generated stub header for clang-tidy analysis */\n")
+
+
+def parse_clang_tidy_output(output: str, target_files: set[str], rules_by_id: dict[str, RuleInfo],
+                            position_keys: set[str]) -> list[AnalysisIssue]:
+    issues: list[AnalysisIssue] = []
+    for line_text in (output or "").splitlines():
+        m = DIAGNOSTIC_RE.match(line_text)
+        if not m:
+            continue
+        file = m.group("file").strip()
+        line, col = int(m.group("line")), int(m.group("col"))
+        raw_msg = m.group("msg").strip()
+        sev = "Error" if m.group("sev") == "error" else "Warning"
+        if line <= 0 or normalize_path(file) not in target_files:
+            continue
+        ids = [x.strip() for x in m.group("ids").split(",")
+               if x.strip() and not x.strip().lower().startswith("clang-diagnostic-")]
+        if not ids:
+            continue
+        # 축소 변환은 자체 검사 규칙과 ON/OFF를 공유한다.
+        if "bugprone-narrowing-conversions" in ids:
+            ids = ["implicitNarrowing"]
+        # 실수형 루프 카운터 진단은 CERT FLP30-C로 표시
+        if any("float-loop-counter" in i.lower() or "floatloopcounter" in i.lower() or i.lower() == "cert-flp30-c"
+               for i in ids):
+            ids = ["cert-flp30-c"]
+        # 별칭이 함께 붙은 경우 등록된 ID 중 ON인 것을 우선하고, 등록된 별칭이 모두 OFF이면 보고하지 않음
+        registered = [i for i in ids if i in rules_by_id]
+        if registered and all(not rules_by_id[i].is_enabled for i in registered):
+            continue
+        selected = next((i for i in registered if rules_by_id[i].is_enabled), None) \
+            or next((i for i in ids if i.lower().startswith("cert-")), None) or ids[0]
+        rule = rules_by_id.get(selected)
+        if rule is not None and not rule.is_enabled:
+            continue
+        if rule is None:
+            rule = RuleInfo.create_unregistered(selected, sev, "Clang-Tidy")
+        if make_position_key(selected, file, line, col) in position_keys:
+            continue
+        position_keys.add(make_position_key(selected, file, line, col))
+        msg = f"{rule.summary} ({raw_msg})" if rule.summary and rule.summary != raw_msg else raw_msg
+        issues.append(AnalysisIssue(
+            rule_id=selected, category=rule.category, severity=sev if rule.is_unregistered else rule.severity,
+            obligation=rule.obligation, title=rule.title, message=msg, file_path=os.path.abspath(file),
+            line=line, column=col, rule_details=rule))
+    return issues
