@@ -144,8 +144,7 @@ def run_analysis(
     result = AnalysisRunResult()
     cppcheck = paths.cppcheck_executable()
     if not cppcheck:
-        raise ToolNotFoundError("Cppcheck 실행 파일을 찾을 수 없습니다. 'sudo apt install cppcheck'로 설치하거나 "
-                                "JEONCHECK_CPPCHECK 환경변수로 경로를 지정하십시오.")
+        raise ToolNotFoundError("Cppcheck 실행 파일을 찾을 수 없습니다. " + paths.install_hint("cppcheck"))
     addon_dir = paths.cppcheck_addon_directory(cppcheck)
     if addon_dir is None:
         raise ToolNotFoundError("Cppcheck addon(misra.py, cppcheckdata.py) 폴더를 찾을 수 없습니다. "
@@ -222,7 +221,7 @@ def run_analysis(
                 result.notes.append(create_note(
                     "clangTidyMissing", "Clang-Tidy 미설치 안내",
                     "[Clang-Tidy 안내] clang-tidy 실행 파일을 찾지 못해 Clang-Tidy 분석을 건너뛰었습니다. "
-                    "'sudo apt install clang-tidy'로 설치하거나 JEONCHECK_CLANG_TIDY 환경변수로 경로를 지정하십시오."))
+                    + paths.install_hint("clang-tidy")))
         finally:
             guard.close()
             os.unlink(targets_json.name)

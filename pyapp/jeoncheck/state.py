@@ -709,7 +709,7 @@ class AppState:
         if editor == "VS Code":
             self.set_status(f"VS Code로 열었습니다: {name} ({line}번째 줄)")
         else:
-            self.set_status(f"기본 편집기로 열었습니다: {name} (VS Code가 설치되어 있지 않아 줄 이동은 지원되지 않습니다)")
+            self.set_status(f"외부 편집기({editor})로 열었습니다: {name} (VS Code가 설치되어 있지 않아 줄 이동은 지원되지 않습니다)")
 
     def open_current_file_folder(self) -> None:
         path = self.current_code_file_path

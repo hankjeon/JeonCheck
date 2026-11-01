@@ -2,7 +2,7 @@
 
 전검사는 임베디드 C 소스를 검사하는 **Windows 데스크탑 애플리케이션(.NET 10 WPF)**입니다. 내장 Cppcheck, C# AST 분석기, 선택적으로 실행하는 Clang-Tidy의 결과를 한글 설명과 함께 표시합니다.
 
-Ubuntu에서는 같은 데이터(`data/`, `samples/`)를 사용하는 **PySide6 앱(`pyapp/`)**을 실행할 수 있습니다. 실행 방법과 Windows 앱과의 차이는 [Ubuntu (PySide6) 실행](#ubuntu-pyside6-실행)을 참고하십시오.
+Ubuntu에서는 같은 데이터(`data/`, `samples/`)를 사용하는 **PySide6 앱(`pyapp/`)**을 실행할 수 있습니다. 이 앱은 Windows에서도 저장소의 내장 도구(`tools/`)로 실행할 수 있습니다. 실행 방법과 WPF 앱과의 차이는 [Ubuntu (PySide6) 실행](#ubuntu-pyside6-실행)을 참고하십시오.
 
 크로스 컴파일러 없이 타겟 프리셋으로 분석을 시작할 수 있습니다. 실제 헤더·매크로·컴파일 옵션이 부족하면 결과가 제한될 수 있으며, MISRA 전체 규칙 지원이나 결함의 완전한 검출을 보장하지 않습니다.
 
@@ -62,7 +62,7 @@ cd pyapp
 .venv/bin/python -m pytest -q          # 단위·통합 테스트 (cppcheck가 없으면 통합 테스트는 건너뜀)
 ```
 
-도구는 PATH에서 찾으며 `JEONCHECK_CPPCHECK`, `JEONCHECK_CLANG_TIDY`, `JEONCHECK_ADDON_DIR`(misra.py가 있는 addon 폴더) 환경변수로 바꿀 수 있습니다. 프로젝트 파일(`*.jcproj`)은 Windows 앱과 같은 형식이며 서로 열 수 있습니다.
+도구는 환경변수 → (Windows) 저장소 내장 도구 → PATH 순으로 찾습니다. `JEONCHECK_CPPCHECK`, `JEONCHECK_CLANG_TIDY`, `JEONCHECK_ADDON_DIR`(misra.py가 있는 addon 폴더) 환경변수로 바꿀 수 있습니다. 프로젝트 파일(`*.jcproj`)은 Windows 앱과 같은 형식이며 서로 열 수 있습니다.
 
 Windows 앱과 결과가 같지 않을 수 있습니다.
 
@@ -71,14 +71,30 @@ Windows 앱과 결과가 같지 않을 수 있습니다.
 - **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 C# 검사를 Python으로 옮긴 것이며, 필수 타입은 `misra.py`의 `getEssentialType()`으로 계산합니다.
 - **외부 도구:** 외부 편집기는 VS Code(`code`)가 있으면 해당 줄로 열고, 없으면 `xdg-open`으로 엽니다.
 
+### Windows에서 Python 앱 실행
+
+Windows에서는 `tools/cppcheck/cppcheck.exe`·`tools/clang-tidy/clang-tidy.exe`를 기본으로 사용하고, MISRA 검사는 같은 버전(2.22)의 `tools/cppcheck/addons/misra.py`를 실행합니다. Python 3.10 이상이 필요합니다.
+
+```bat
+py -m venv pyapp\.venv
+pyapp\.venv\Scripts\pip install -r pyapp\requirements.txt
+cd pyapp
+.venv\Scripts\python -m jeoncheck
+.venv\Scripts\python -m pytest -q
+```
+
+- **WPF 앱과의 차이:** 같은 Cppcheck 2.22를 쓰지만 MISRA는 `misra.py` 전체 규칙을 보고하므로 WPF 앱(25개 규칙)보다 진단이 많을 수 있습니다.
+- **외부 도구:** VS Code(`Code.exe`)가 있으면 해당 줄로 열고, 없으면 메모장으로 엽니다. 폴더 열기는 탐색기에서 파일을 선택한 상태로 엽니다.
+- **검증 범위:** Windows 분기는 Linux에서 도구 선택과 명령 구성만 자동 테스트했습니다. Windows에서의 실제 실행·화면 동작은 아직 검증되지 않았습니다.
+
 ## 폴더 및 문서
 
 | 경로 | 내용 |
 | --- | --- |
 | `dotnetapp/` | WPF 앱과 솔루션 |
-| `pyapp/` | Ubuntu용 PySide6 앱과 pytest 테스트 |
+| `pyapp/` | PySide6 앱(Ubuntu 기본, Windows 실행 가능)과 pytest 테스트 |
 | `data/` | 타겟 프리셋·플랫폼 XML·한글 규칙 DB |
-| `tools/` | Windows용 Cppcheck·Clang-Tidy와 분석 보조 파일 (`clang-tidy/include` 간이 헤더는 두 앱이 공유) |
+| `tools/` | Windows용 Cppcheck·Clang-Tidy와 분석 보조 파일. Windows에서는 WPF·Python 앱이 함께 사용하고, Linux에서는 `clang-tidy/include` 간이 헤더만 사용 |
 | `samples/` | 의도적인 위반을 포함한 C 샘플과 프로젝트 |
 | `dotnetapp/JeonCheck.Analysis.Tests/` | 분석기·설명 처리·규칙별 요약 회귀 테스트 |
 | [AGENTS.md](AGENTS.md) | 에이전트 행동 원칙과 구현 범위 |
