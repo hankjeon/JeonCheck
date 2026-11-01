@@ -304,32 +304,9 @@ public class ClangTidyRunner
             if (checkIds.Count == 0)
                 continue;
 
-            // 1) bugprone-narrowing-conversions는 implicitNarrowing 규칙(ON/OFF 공유)으로 표시
-            //    가능한 많은 결함을 보여 주기 위해 C# 분석기가 같은 줄에서 검출한 결과가 있어도 숨기지 않음
-            //    (같은 위치(줄+열)의 완전 중복만 제거)
+            // 축소 변환은 기존 규칙과 ON/OFF를 공유한다. DB에 없을 때도 공통 미등록 경로로 표시한다.
             if (checkIds.Contains("bugprone-narrowing-conversions", StringComparer.OrdinalIgnoreCase))
-            {
-                if (rulesById.TryGetValue("implicitNarrowing", out var narrowRule) && narrowRule.IsEnabled)
-                {
-                    if (existingPositionKeys.Add(AnalysisIssue.MakePositionKey("implicitNarrowing", file, line, col)))
-                    {
-                        issues.Add(new AnalysisIssue
-                        {
-                            RuleId = "implicitNarrowing",
-                            Category = narrowRule.Category,
-                            Severity = narrowRule.Severity,
-                            Obligation = narrowRule.Obligation,
-                            Title = narrowRule.Title,
-                            Message = $"[Clang-Tidy 정밀 검출] 암묵적 축소 변환 ({rawMsg})",
-                            FilePath = Path.GetFullPath(file),
-                            Line = line,
-                            Column = col,
-                            RuleDetails = narrowRule
-                        });
-                    }
-                }
-                continue;
-            }
+                checkIds = new List<string> { "implicitNarrowing" };
 
             // 2) 실수형 루프 카운터 진단은 CERT FLP30-C로 표시 (C# 분석기의 MISRA 14.1 결과와 별개로 모두 표시)
             if (checkIds.Any(id => id.Contains("float-loop-counter", StringComparison.OrdinalIgnoreCase) ||
@@ -356,19 +333,8 @@ public class ClangTidyRunner
             }
             else
             {
-                ruleInfo = new RuleInfo
-                {
-                    Id = selectedId,
-                    Category = "Clang-Tidy / CERT-C",
-                    Severity = selectedId.StartsWith("clang-analyzer-", StringComparison.OrdinalIgnoreCase) ? "Error" : "Warning",
-                    Obligation = selectedId.StartsWith("cert-", StringComparison.OrdinalIgnoreCase) ? "필수(Required)" : "권고(Advisory)",
-                    Title = $"Clang-Tidy 검출 ({selectedId})",
-                    Summary = rawMsg,
-                    Description = $"Clang-Tidy / Clang Static Analyzer가 컴파일러 프론트엔드 분석을 통해 검출한 항목입니다.\n원문 진단: {rawMsg}",
-                    BadExample = "/* 검출된 코드 라인의 타입, 매크로 확장 또는 분기 경로를 확인하십시오. */",
-                    GoodExample = "/* 명시적 형변환 및 방어 조건을 추가하십시오. */",
-                    IsEnabled = true
-                };
+                ruleInfo = RuleInfo.CreateUnregistered(selectedId,
+                    m.Groups["sev"].Value == "error" ? "Error" : "Warning", "Clang-Tidy");
             }
 
             // 같은 위치(줄+열)의 중복만 제거 (여러 소스 파일에 포함된 헤더의 반복 보고 등)
@@ -383,7 +349,7 @@ public class ClangTidyRunner
             {
                 RuleId = selectedId,
                 Category = ruleInfo.Category,
-                Severity = ruleInfo.Severity,
+                Severity = ruleInfo.IsUnregistered ? (m.Groups["sev"].Value == "error" ? "Error" : "Warning") : ruleInfo.Severity,
                 Obligation = ruleInfo.Obligation,
                 Title = ruleInfo.Title,
                 Message = displayMsg,

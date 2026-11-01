@@ -27,9 +27,9 @@
 
 - **프로젝트명**: **전검사** / `JeonCheck` (임베디드 C 정적 분석 도우미)
 - **개발 환경**: Windows Desktop Application / **.NET 10 (WPF)**
-- **정적 분석 엔진**: **Cppcheck (포터블 내장, `tools/cppcheck/`)** + **`--dump` AST 기반 C# 네이티브 분석 엔진** (`misra.py` 핵심 로직을 C#으로 직접 변환하여 Python 의존성 제거 + 암묵적 축소 변환 등 정밀 검사 통합) + **Clang-Tidy (포터블 내장, `tools/clang-tidy/`, CERT-C / `bugprone-*` / `clang-analyzer-*` 보조 정밀 분석)**
+- **정적 분석 엔진**: **Cppcheck (`tools/cppcheck/`)** + **`--dump` AST 기반 C# 분석기** (`misra.py`의 일부 규칙 로직과 자체 타입 검사, Python addon은 실행하지 않음) + **Clang-Tidy (`tools/clang-tidy/`, CERT-C / `bugprone-*` / `clang-analyzer-*` 보조 검사)**. C# 직접 MISRA 검사 25개와 9.1 결과 매핑의 범위는 [아키텍처 문서](doc/02_architecture.md)를 따른다. Python 전체 포팅·전체 MISRA 준수 판정·완전한 검출을 주장하지 않는다.
 - **주요 타겟 프리셋**:
-  - TI DSP: `C6746`, `C6655`, `C6672`, `C6678` (COFF 40-bit long / EABI 32-bit long 및 TI 전용 키워드 처리)
+  - TI DSP: `C6746`, `C6655`, `C6672`, `C6678` EABI 32-bit long 및 `C6746`, `C6678` COFF 40-bit long. TI 전용 키워드를 치환하며 Clang-Tidy에는 ARM 대체 트리플을 사용한다. COFF의 자료형 모델이 두 엔진에서 일치한다고 가정하지 않는다.
   - NXP: `QorIQ T1024` (PowerPC e5500, Big Endian)
   - Microchip: `PolarFire SoC` (64-bit RISC-V, Little Endian)
   - AMD/Xilinx: `Versal AP` (64-bit ARM Cortex-A72), `Versal RP` (32-bit ARM Cortex-R5F)
@@ -38,15 +38,18 @@
   2. 검사 대상 코드와 비대상(참조/제외) 코드 분리 설정
   3. 컴파일러 정보 없이도 타겟 프리셋 기반으로 최대한 분석 수행 (누락된 `#include` 파일 등은 에러가 아닌 Note/Info로 분리 표시)
   4. 코드 뷰어에서 라인별 **검사 완료 줄 / 미검사(Skipped) 줄 / 결함 검출 줄** 시각적 표시
-  5. 암묵적 축소 변환(`Implicit Narrowing Conversion`) 등 핵심 타입 안전성 검출
+  5. 필수 타입과 표현 범위를 판정할 수 있는 대입·인자·반환의 암묵적 축소/부호 변환 검사. 캐스트 결과에서 최종 대상까지의 변환도 검사
   6. 검사 규칙(Ruleset) 목록 조회, 한글 요약 설명 표시 및 개별 규칙 ON/OFF 선택 창 제공
-  7. 내장 한글 규칙 매핑 DB(`rules_ko.json`)를 통한 MISRA C 2012 및 Cppcheck 오류 상세 한글 해설 제공
+  7. `rules_ko.json`에 등록된 진단의 한글 해설 제공. 심각도와 MISRA 의무·프로젝트 정책을 구분하고, 코드 예시 미등록 상태와 분석 한계를 명시. DB 미등록 진단도 원문·미등록 안내로 표시하고 발견한 ID의 ON/OFF를 프로젝트에 저장·복원
   8. 프로젝트 저장 및 불러오기(`*.jcproj`): 추가한 폴더/파일 목록, 대상/비대상 설정(트리에서 제거·이동한 하위 항목 포함), 타겟 프리셋, C 표준·매크로·`--force`·Clang-Tidy 옵션, 선택한 룰셋, 개별 예외 처리 목록 통합 관리
   9. 결함 개별 예외(무시) 처리: 특정 파일·라인의 결함만 예외 처리(줄 단위/항목 단위) 및 해제·일괄 복원, 선택한 규칙 전체 OFF
   10. 분석 옵션: C 표준(`c89`/`c99`/`c11`/`c17`) 선택, 사용자 정의 매크로(`-D`) 입력, 모든 `#ifdef` 분기 강제 검사(`--force`), Clang-Tidy 사용 여부
   11. 분석 진행 중 취소: 실행 중인 Cppcheck/Clang-Tidy 프로세스 종료 및 임시 파일(`.dump` 등) 정리
   12. 외부 도구 연동: 현재 파일을 외부 편집기로 열기(VS Code 설치 시 선택한 줄로 이동, 미설치 시 메모장), 탐색기에서 파일 위치 열기
   13. 내장 샘플 프로젝트(`samples/`) 로드(시작 시 자동 로드 및 [샘플 로드] 버튼) 및 프로그램 정보(About) 창
+  14. 결과의 규칙별 요약 탭: 규칙 ID·한글 규칙명·진단 건수, 파일·줄·열과 코드 미리보기, 항목 선택 시 코드·상세 설명 이동. 기존 검색·분류·예외 상태 공유
+
+현재 구현의 남은 불일치와 검증 범위는 [요구사항 문서](doc/01_requirements.md#남은-구현-불일치와-검증-제한)에 기록한다. 개별 예외는 규칙+파일+줄 단위이며 열별 예외가 아니다. 소스 트리는 체크박스 대신 대상/참조 트리 간 이동으로 관리한다. 문서에 기대 동작을 적는 것만으로 미구현 기능을 완료 처리하지 않는다.
 - **제외 범위 (현재 비검토 대상)**:
   - 외부 제출용 리포트 문서화 출력(PDF, HTML, Word 등) 기능은 구현하지 않는다.
 
@@ -57,3 +60,4 @@
 - **간결하고 직관적인 구조**: 유지보수와 디버깅이 쉽도록 불필요한 외부 라이브러리 의존성을 최소화하고, .NET 10 WPF 표준 기능과 직관적인 MVVM(또는 깔끔한 모듈 분리) 구조를 사용한다.
 - **데이터 분리**: 타겟 프리셋 설정과 한글 규칙 설명 매핑(`rules_ko.json`)은 코드에 하드코딩하지 않고 JSON/XML 데이터 파일로 분리하여 추후 쉽게 편집·확장할 수 있게 한다.
 - **단계별 검증**: 구현 지시를 받은 후에도 한 번에 과도한 변경을 하기보다, 확인 가능한 단위로 구현하고 빌드 및 동작 여부를 검증한다.
+- **검증 명령과 한계**: [README의 개발·검증 절차](README.md#개발실행검증)와 [콘솔 회귀 테스트 안내](tests/JeonCheck.Analysis.Tests/README.md)를 따른다. 테스트는 `dotnet run --project tests/JeonCheck.Analysis.Tests`로 실행한다. Linux 교차 빌드 성공과 콘솔 테스트 통과를 Windows GUI·내장 도구 통합 검증으로 표현하지 않는다.

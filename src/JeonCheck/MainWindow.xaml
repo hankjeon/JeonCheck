@@ -387,7 +387,7 @@
 
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#3E3E42" />
 
-                <!-- 중앙 하단: 결과 3개 탭 (결함 목록 / 누락 파일 노트 / 예외 무시 목록) -->
+                <!-- 중앙 하단: 결함 목록 / 규칙별 요약 / 노트 / 예외 항목 -->
                 <TabControl Grid.Row="2" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="0,1,0,0">
                     <TabControl.Resources>
                         <Style TargetType="TabItem">
@@ -500,7 +500,76 @@
                         </DockPanel>
                     </TabItem>
 
-                    <!-- 탭 2: 노트 / 누락 헤더 안내 -->
+                    <!-- 규칙별 발생 건수와 발생 위치·코드 -->
+                    <TabItem Header="{Binding RuleSummaryTabHeader}">
+                        <DockPanel Background="#1E1E1E">
+                            <Border DockPanel.Dock="Top" Background="#252526" Padding="8,5" BorderBrush="#333337" BorderThickness="0,0,0,1">
+                                <StackPanel>
+                                    <WrapPanel>
+                                        <TextBlock Text="분류 필터:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                        <ComboBox ItemsSource="{Binding DefectCategoryFilters}" SelectedItem="{Binding SelectedDefectCategoryFilter}"
+                                                  Width="145" Margin="0,0,14,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="결함 검색:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                        <TextBox Text="{Binding DefectSearchText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
+                                                 Width="220" Padding="5,2" Background="#1E1E1E" Foreground="#E6EDF3" BorderBrush="#4E5157" />
+                                    </WrapPanel>
+                                    <TextBlock Text="{Binding RuleSummaryStatusText}" Foreground="#9DA7B3" FontSize="11.5" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Grid>
+                                <TreeView ItemsSource="{Binding RuleIssueGroups}" Background="#1E1E1E" BorderThickness="0"
+                                          Foreground="#E6EDF3" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                          VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                          SelectedItemChanged="RuleSummaryTree_SelectedItemChanged">
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="TreeViewItem">
+                                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
+                                    <TreeView.Resources>
+                                        <HierarchicalDataTemplate DataType="{x:Type models:RuleIssueGroup}" ItemsSource="{Binding Occurrences}">
+                                            <HierarchicalDataTemplate.ItemContainerStyle>
+                                                <Style TargetType="TreeViewItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                </Style>
+                                            </HierarchicalDataTemplate.ItemContainerStyle>
+                                            <TextBlock Text="{Binding Header}" Foreground="#F2CC60" FontWeight="SemiBold" TextWrapping="Wrap" Margin="4,6" />
+                                        </HierarchicalDataTemplate>
+                                        <DataTemplate DataType="{x:Type models:RuleIssueOccurrence}">
+                                            <StackPanel Margin="4,3,12,5" ToolTip="{Binding Issue.Message}">
+                                                <TextBlock x:Name="OccurrenceLocation" Text="{Binding Location}" Foreground="#79C0FF" FontSize="11.5" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="OccurrenceCode" Text="{Binding CodeText}" Foreground="#E6EDF3" FontFamily="{StaticResource CodingFont}"
+                                                           TextWrapping="Wrap" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=TreeViewItem}}" Value="True">
+                                                    <Setter TargetName="OccurrenceLocation" Property="Foreground" Value="White" />
+                                                    <Setter TargetName="OccurrenceCode" Property="Foreground" Value="White" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </TreeView.Resources>
+                                </TreeView>
+                                <TextBlock Text="표시할 진단이 없습니다. 분석 결과와 검색·분류 조건을 확인하십시오."
+                                           Foreground="#9DA7B3" Margin="12" TextWrapping="Wrap" IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding RuleIssueGroups.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </DockPanel>
+                    </TabItem>
+
+                    <!-- 노트 / 누락 헤더 안내 -->
                     <TabItem Header="{Binding NotesTabHeader}">
                         <DataGrid ItemsSource="{Binding NotesAndInfos}"
                                   AutoGenerateColumns="False"
@@ -533,7 +602,7 @@
                         </DataGrid>
                     </TabItem>
 
-                    <!-- 탭 3: 예외(무시) 처리된 항목 -->
+                    <!-- 예외(무시) 처리된 항목 -->
                     <TabItem Header="{Binding SuppressedTabHeader}">
                         <DockPanel Background="#1E1E1E">
                             <Border DockPanel.Dock="Top" Background="#252526" Padding="8,5">
@@ -605,14 +674,14 @@
                             <!-- 규칙 헤더 -->
                             <Border Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10">
                                 <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <WrapPanel Margin="0,0,0,4">
                                         <Border Background="#094771" CornerRadius="3" Padding="6,2" Margin="0,0,6,0">
                                             <TextBlock Text="{Binding SelectedIssue.Category}" FontSize="11" FontWeight="Bold" Foreground="#79C0FF" />
                                         </Border>
                                         <Border Background="#3B2E12" CornerRadius="3" Padding="6,2">
-                                            <TextBlock Text="{Binding SelectedIssue.Obligation}" FontSize="11" FontWeight="Bold" Foreground="#F2CC60" />
+                                            <TextBlock Text="{Binding SelectedIssue.ObligationDisplay}" FontSize="11" FontWeight="Bold" Foreground="#F2CC60" TextWrapping="Wrap" />
                                         </Border>
-                                    </StackPanel>
+                                    </WrapPanel>
 
                                     <TextBlock Text="{Binding SelectedIssue.RuleId}" FontFamily="{StaticResource CodingFont}" FontSize="13" FontWeight="Bold" Foreground="#FF7B72" Margin="0,2,0,2" />
                                     <TextBlock Text="{Binding SelectedIssue.Title}" FontSize="14.5" FontWeight="Bold" Foreground="#E6EDF3" TextWrapping="Wrap" />
@@ -647,14 +716,14 @@
                             <!-- 위반 코드 예시 (Bad) -->
                             <TextBlock Text="❌ 위반 코드 예시 (Bad)" FontWeight="Bold" Foreground="#F85149" Margin="0,0,0,4" />
                             <Border Background="#1A1415" BorderBrush="#6E3630" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
-                                <TextBlock Text="{Binding SelectedIssue.RuleDetails.BadExample}"
+                                <TextBlock Text="{Binding SelectedIssue.RuleDetails.BadExampleDisplay}"
                                            FontFamily="{StaticResource CodingFont}" FontSize="12" Foreground="#E6EDF3" TextWrapping="Wrap" />
                             </Border>
 
                             <!-- 개선 코드 예시 (Good) -->
-                            <TextBlock Text="✅ 안전한 개선 예시 (Good)" FontWeight="Bold" Foreground="#3FB950" Margin="0,0,0,4" />
+                            <TextBlock Text="✅ 개선 방향 및 코드 예시 (Good)" FontWeight="Bold" Foreground="#3FB950" Margin="0,0,0,4" />
                             <Border Background="#131F17" BorderBrush="#238636" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">
-                                <TextBlock Text="{Binding SelectedIssue.RuleDetails.GoodExample}"
+                                <TextBlock Text="{Binding SelectedIssue.RuleDetails.GoodExampleDisplay}"
                                            FontFamily="{StaticResource CodingFont}" FontSize="12" Foreground="#E6EDF3" TextWrapping="Wrap" />
                             </Border>
                         </StackPanel>

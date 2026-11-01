@@ -7,8 +7,8 @@
       "obligation": "필수(Required)",
       "defaultEnabled": true,
       "title": "암묵적 축소 변환 (Implicit Narrowing Conversion)",
-      "summary": "명시적 캐스트 없이 큰 비트 폭의 값을 더 작은 비트 폭의 타입에 대입·전달·반환함",
-      "description": "더 넓은 비트 폭을 가진 정수(예: 32-bit int)나 실수(double) 값을 명시적 형변환 없이 더 좁은 비트 폭의 변수(예: 16-bit short, 8-bit char, float)에 대입하거나 함수 인자로 전달하면 상위 비트가 잘려나가(Truncation) 센서 데이터나 제어 출력이 왜곡될 수 있습니다. 이 규칙은 비트 폭이 줄어들어 데이터가 손실되는 축소 변환(정수 축소, double → float, 실수 → 정수)만 검출합니다. 부호 변환은 implicitSignConversion, MISRA 기준의 타입 범주 변경 전체는 misra-c2012-10.3에서 검출합니다.",
+      "summary": "암묵적 정수·실수 변환에서 비트 폭 또는 정밀도가 손실될 수 있음",
+      "description": "더 넓은 타입의 값을 더 좁은 타입으로 대입·인자 전달·반환하면 값의 범위나 정밀도가 손실될 수 있습니다. 정수 축소는 상위 비트를 잃을 수 있고 실수 변환은 반올림이나 소수 부분 손실을 일으킬 수 있습니다. C# 분석기는 정수 축소, 실수 축소 및 실수→정수 변환을 검사하며, Clang-Tidy가 보고한 정수→실수 등의 정밀도 손실도 이 항목으로 통합 표시합니다. 원문 진단과 소스 타입을 확인하고 대상 타입의 범위를 검사하십시오. 부호 변환과 MISRA 필수 타입 범주 검사는 각각 별도 규칙도 제공합니다.",
       "badExample": "int32_t adc_raw = read_adc_channel(0);\nint16_t pwm_duty = adc_raw; // 위험: 32비트 -> 16비트 암묵적 축소 대입",
       "goodExample": "int32_t adc_raw = read_adc_channel(0);\nif (adc_raw >= INT16_MIN && adc_raw <= INT16_MAX) {\n    int16_t pwm_duty = (int16_t)adc_raw; // 범위 확인 후 명시적 캐스팅\n}"
     },
@@ -19,10 +19,10 @@
       "obligation": "필수(Required)",
       "defaultEnabled": true,
       "title": "암묵적 부호 변환 (Implicit Sign Conversion)",
-      "summary": "명시적 캐스트 없이 부호 있는 정수(signed)와 부호 없는 정수(unsigned) 간에 값을 대입·전달함",
-      "description": "음수가 될 수 있는 signed 변수를 unsigned 변수에 암묵적으로 대입하면 2의 보수 표현에 의해 매우 큰 양수로 둔갑(Wrap-around)하며, 반대로 큰 unsigned 값을 signed에 넣으면 음수로 해석되어 제어 로직 및 배열 인덱싱에서 치명적인 오류를 유발합니다.",
-      "badExample": "int32_t error_delta = target - current;\nuint32_t abs_step = error_delta; // 위험: 음수일 경우 42억 이상의 큰 양수로 변환됨",
-      "goodExample": "int32_t error_delta = target - current;\nuint32_t abs_step = (error_delta >= 0) ? (uint32_t)error_delta : (uint32_t)(-error_delta);"
+      "summary": "부호 있는 정수와 부호 없는 정수 간의 암묵적 대입·인자 전달·반환을 검토함",
+      "description": "음수를 unsigned 타입으로 변환하면 대상 타입의 범위에 따른 모듈러 변환이 일어납니다. 이는 2의 보수 표현에만 의존하는 규칙이 아닙니다. unsigned 값을 signed 타입으로 변환할 때 대상 범위를 벗어나면 C89~C17에서는 결과가 구현 정의이거나 구현 정의 신호가 발생할 수 있습니다. 값의 범위를 먼저 확인하십시오. 차이의 절댓값이 목적이라면 뺄셈과 부호 반전도 충분히 넓은 타입에서 수행해야 INT32_MIN 등의 경계값을 안전하게 처리할 수 있습니다.",
+      "badExample": "int32_t error_delta = target - current; // 차이가 int32_t 범위를 넘으면 뺄셈 자체도 위험\nuint32_t step = error_delta; // 음수가 큰 unsigned 값으로 변환될 수 있음",
+      "goodExample": "/* target과 current는 int32_t 값이라고 가정 */\nint64_t error_delta = (int64_t)target - (int64_t)current;\nuint32_t abs_step = (uint32_t)((error_delta >= 0) ? error_delta : -error_delta);\n/* 두 int32_t 값의 차이의 크기는 UINT32_MAX 이하이므로 변환 가능 */"
     },
     {
       "id": "explicitNarrowingCast",
@@ -44,7 +44,7 @@
       "defaultEnabled": true,
       "title": "타겟 포인터 비트 폭 불일치 변환 (Pointer Size Mismatch)",
       "summary": "포인터를 타겟 아키텍처의 포인터 크기보다 작은 정수형에 대입하거나 캐스팅함",
-      "description": "64-bit 타겟(예: Versal AP Cortex-A72, PolarFire RISC-V 64, NXP T1024 64-bit 모드)에서는 포인터가 64비트(8바이트)입니다. 이를 uint32_t나 int에 저장하면 상위 32비트 주소가 유실되어 즉각적인 메모리 폴트(Crash)가 발생합니다.",
+      "description": "포인터보다 비트 폭이 작은 정수형으로 주소를 변환하면 일부 주소를 표현할 수 없습니다. C89~C17에서 포인터를 정수로 변환한 결과는 구현 정의이며, 대상 정수형으로 표현할 수 없는 경우에는 정의되지 않은 동작이 됩니다. 실제 장애 여부는 주소 값과 이후 사용에 따라 달라집니다. 주소를 정수로 보관해야 한다면 구현이 제공하는 uintptr_t의 지원 여부를 확인하십시오. uintptr_t를 사용해도 MISRA의 포인터·정수 변환 제한이 자동으로 해제되는 것은 아닙니다.",
       "badExample": "void *dma_buf = get_dma_buffer();\nuint32_t addr = (uint32_t)dma_buf; // 64-bit 타겟에서 상위 32비트 주소 손실!",
       "goodExample": "#include <stdint.h>\nvoid *dma_buf = get_dma_buffer();\nuintptr_t addr = (uintptr_t)dma_buf; // 타겟 포인터 크기와 동일한 uintptr_t 사용"
     },
@@ -130,7 +130,7 @@
       "summary": "메모리 주소(포인터)와 정수형 간의 형변환은 하드웨어 종속적이므로 최소화해야 함",
       "description": "임베디드 시스템에서 하드웨어 레지스터 주소 매핑을 위해 불가피하게 사용되는 경우가 있으나, 일반 로직에서 포인터와 정수를 변환하면 64비트/32비트 타겟 이동 시 주소 잘림이나 정렬 오류가 발생할 수 있습니다. 레지스터 매핑 헤더 외에는 사용을 피하거나 해당 라인만 예외 처리하십시오.",
       "badExample": "uint32_t base_addr = 0x02320000U;\nvolatile uint32_t *reg = (volatile uint32_t *)base_addr;",
-      "goodExample": "/* 하드웨어 레지스터 정의 헤더(비대상/예외 영역)에서만 매크로로 격리하여 사용 */\n#define TIMER0_CNT_REG  (*(volatile uint32_t *)0x02320000UL)"
+      "goodExample": "/* 불가피한 레지스터 매핑: 이 매크로에도 포인터·정수 변환이 남아 있음 */\n#define TIMER0_CNT_REG (*(volatile uint32_t *)0x02320000UL)\n/* 실제 접근 예: uint32_t count = TIMER0_CNT_REG; */\n/* 타겟의 주소·정렬·폭을 검증하고, 프로젝트의 승인된 예외 절차로 관리 */"
     },
     {
       "id": "misra-c2012-11.5",
@@ -151,8 +151,8 @@
       "obligation": "필수(Required)",
       "defaultEnabled": true,
       "title": "MISRA 11.8 - 포인터 캐스트로 const 또는 volatile 한정자 제거 금지",
-      "summary": "포인터 형변환을 통해 원본이 가진 const(읽기 전용)나 volatile(하드웨어 레지스터) 속성을 제거해서는 안 됨",
-      "description": "임베디드에서 하드웨어 상태 레지스터를 가리키는 volatile 포인터에서 volatile을 제거하면 컴파일러 최적화로 인해 레지스터 폴링 루프가 무한 루프에 빠지며, const 제거 후 쓰기를 시도하면 ROM/Flash 영역 쓰기 예외가 발생합니다.",
+      "summary": "포인터 변환으로 가리키는 타입의 const 또는 volatile 한정자를 제거하지 말 것",
+      "description": "volatile 한정자를 제거한 경로로 하드웨어 레지스터 등에 접근하면 필요한 읽기·쓰기가 최적화되어 장치 상태를 올바르게 관찰하지 못할 수 있습니다. const 포인터가 반드시 ROM/Flash를 가리키는 것은 아닙니다. 원래 const로 정의된 객체를 수정하면 정의되지 않은 동작이며, 보호된 메모리에 대한 쓰기는 하드웨어 예외를 일으킬 수도 있습니다. 원래 객체의 한정자를 보존하십시오.",
       "badExample": "void clear_buf(const uint8_t *ro_ptr, volatile uint32_t *hw_reg) {\n    uint8_t *rw_ptr = (uint8_t *)ro_ptr;     // const 제거 위반!\n    uint32_t *cached = (uint32_t *)hw_reg;   // volatile 제거 위반!\n}",
       "goodExample": "void read_data(const uint8_t *ro_ptr, volatile uint32_t *hw_reg) {\n    const uint8_t first = *ro_ptr;\n    uint32_t reg_val = *hw_reg; // 한정자를 그대로 유지하여 접근\n}"
     },
@@ -175,8 +175,8 @@
       "obligation": "필수(Required)",
       "defaultEnabled": true,
       "title": "MISRA 12.2 - 시프트 연산의 우변 범위 준수",
-      "summary": "비트 시프트(<<, >>)의 이동 비트 수는 0 이상이고 좌변 피연산자 비트 폭 미만이어야 함",
-      "description": "32비트 변수에 대해 32비트 이상 시프트(예: 1U << 32)하거나 음수만큼 시프트하면 C 표준상 미정의 동작(Undefined Behavior)이 되어 CPU 아키텍처마다 0 또는 원래 값이 그대로 남는 등 다른 결과를 냅니다.",
+      "summary": "시프트 양은 0 이상이고 좌변 필수 타입의 비트 폭 미만이어야 함",
+      "description": "MISRA 12.2는 정수 승격 후의 연산 타입이 아니라 좌변의 필수 타입(Essential Type)을 기준으로 시프트 양을 제한합니다. 예를 들어 8비트 unsigned 변수의 8비트 시프트는 32비트 int로 승격되어 C 언어상 유효할 수 있어도 이 규칙에는 위반할 수 있습니다. 별도로 C 언어에서 음수만큼 이동하거나 승격된 좌변 타입의 폭 이상으로 이동하면 정의되지 않은 동작입니다.",
       "badExample": "uint32_t mask = 1U << 32U; // 32비트 타입에서 32비트 시프트는 미정의 동작!",
       "goodExample": "uint64_t mask = 1ULL << 32U; // 64비트 상수로 확장 후 시프트"
     },
@@ -234,11 +234,11 @@
       "severity": "Warning",
       "obligation": "필수(Required)",
       "defaultEnabled": true,
-      "title": "MISRA 14.4 - if 및 반복문의 조건식은 명시적 비교(Boolean) 식이어야 함",
-      "summary": "정수나 포인터 변수를 비교 연산자(!= 0, != NULL) 없이 직접 조건식에 사용하지 말 것",
-      "description": "'if (ptr)'이나 'if (count)' 대신 'if (ptr != NULL)', 'if (count != 0)'으로 명확히 작성하여 반환값의 의미(0이 성공인지 실패인지 등)에 대한 착오를 방지합니다.",
+      "title": "MISRA 14.4 - 제어 조건식에 필수 Boolean 타입 사용",
+      "summary": "if 및 반복문의 제어 조건식은 MISRA 필수 타입 기준으로 Boolean이어야 함",
+      "description": "bool 변수와 비교·논리 연산 결과처럼 필수 Boolean 타입인 식은 조건식에 직접 사용할 수 있습니다. 정수나 포인터 조건은 != 0, != NULL 등으로 의도를 명시하십시오. strcmp는 같을 때 0을 반환하므로 기존 if (strcmp(a, b))의 의미를 보존하려면 != 0으로 바꿔야 합니다. 문자열이 같은지를 검사하려는 경우에만 == 0을 사용하십시오.",
       "badExample": "if (remain_bytes) { ... }\nif (strcmp(a, b)) { ... } // strcmp는 같을 때 0을 반환하므로 착각하기 쉬움",
-      "goodExample": "if (remain_bytes != 0U) { ... }\nif (strcmp(a, b) == 0) { ... }"
+      "goodExample": "if (remain_bytes != 0U) { /* 남은 바이트가 있을 때 */ }\nif (strcmp(a, b) != 0) { /* 기존 코드와 동일하게 서로 다를 때 실행 */ }\n/* ready는 bool 타입: 명시적 비교 없이 사용 가능 */\nif (ready) { /* 준비 완료 처리 */ }"
     },
     {
       "id": "misra-c2012-15.1",
@@ -296,7 +296,7 @@
       "defaultEnabled": true,
       "title": "MISRA 17.2 - 함수 재귀 호출(Recursion) 금지",
       "summary": "함수가 자기 자신을 직접 또는 간접적으로 호출하는 재귀 구조를 사용하지 말 것",
-      "description": "임베디드 시스템(DSP, MCU, RTOS 태스크)은 스택 메모리 크기가 엄격히 제한되어 있습니다. 재귀 호출을 사용하면 최대 스택 사용량(WCET/Stack Depth)을 정적으로 보장할 수 없어 스택 오버플로우로 시스템이 다운될 수 있습니다.",
+      "description": "재귀 호출은 호출 깊이에 따라 스택 사용량과 실행 시간이 늘어나므로 임베디드 시스템에서 스택 오버플로 등의 위험을 높일 수 있습니다. MISRA 17.2는 직접·간접 재귀 호출을 금지합니다. 호출 깊이를 별도로 제한한 경우에도 규칙 위반 여부와 프로젝트의 예외 절차를 검토해야 합니다. 최대 스택 사용량과 WCET(최악 실행 시간)는 서로 다른 검증 항목입니다.",
       "badExample": "uint32_t factorial(uint32_t n) {\n    return (n <= 1U) ? 1U : (n * factorial(n - 1U)); // 재귀 호출 금지!\n}",
       "goodExample": "uint32_t factorial(uint32_t n) {\n    uint32_t result = 1U;\n    for (uint32_t i = 2U; i <= n; i++) {\n        result *= i;\n    }\n    return result; // 반복문으로 변환\n}"
     },
@@ -440,9 +440,9 @@
       "defaultEnabled": true,
       "title": "정수 산술 오버플로우 (Integer Overflow)",
       "summary": "정수 연산 결과가 해당 자료형이 표현할 수 있는 최대/최소 범위를 초과함",
-      "description": "부호 있는 정수의 오버플로우는 미정의 동작이며, 양수가 갑자기 음수로 뒤집혀 제어기 출력이 역방향 최대치로 튀는 사고를 일으킬 수 있습니다.",
-      "badExample": "int16_t a = 20000;\nint16_t b = 20000;\nint16_t c = a + b; // 16비트 최대값(32767) 초과!",
-      "goodExample": "int32_t a = 20000;\nint32_t b = 20000;\nint32_t c = a + b; // 충분한 비트 폭(32비트)에서 연산"
+      "description": "부호 있는 정수의 산술 연산 결과가 연산 타입의 표현 범위를 벗어나면 C89~C17에서는 정의되지 않은 동작입니다. 결과가 반드시 음수로 래핑되는 것은 아닙니다. 연산 타입은 정수 승격과 일반 산술 변환에 의해 정해집니다. 32비트 int 환경에서 int16_t 두 값은 int로 승격되어 더해지므로, 그 합을 int16_t에 넣는 범위 초과 변환과 연산 자체의 오버플로를 구분해야 합니다.",
+      "badExample": "int32_t a = INT32_MAX;\nint32_t c = a + (int32_t)1; // 덧셈 결과가 int32_t의 표현 범위를 초과",
+      "goodExample": "int32_t a = INT32_MAX;\nint64_t c = (int64_t)a + (int64_t)1; // 덧셈 전에 확장하여 결과를 보존"
     },
     {
       "id": "truncLongCastAssignment",
@@ -570,9 +570,9 @@
       "severity": "Error",
       "obligation": "필수(Required)",
       "defaultEnabled": true,
-      "title": "Clang-Tidy - 포인터에 대한 sizeof 오용",
-      "summary": "배열 전체 크기를 구하려는 의도였으나 포인터 변수에 sizeof(ptr)를 사용하여 포인터 크기(4 또는 8바이트)만 반환됨",
-      "description": "함수 매개변수로 전달된 배열이나 포인터에 sizeof(p)를 호출하면 버퍼 크기가 아니라 포인터 주소 크기(4/8바이트)만 계산되어 버퍼 일부만 초기화되거나 복사가 누락됩니다.",
+      "title": "Clang-Tidy - 의심스러운 sizeof 사용 및 크기 계산",
+      "summary": "상수·포인터·중첩 sizeof 또는 sizeof를 조합한 의심스러운 크기 계산을 검출함",
+      "description": "이 검사는 포인터의 sizeof를 배열 크기로 사용하는 경우뿐 아니라 숫자 상수의 sizeof, sizeof(sizeof(x)), 의심스러운 sizeof 나눗셈·곱셈 등도 검사합니다. 세부 검사의 활성 여부는 Clang-Tidy 버전과 옵션에 따라 다릅니다. 원문 진단에서 어떤 크기 계산이 지적되었는지 확인하십시오. 함수의 배열 매개변수는 포인터로 조정되므로 sizeof(p)는 전체 버퍼 크기가 아닙니다.",
       "badExample": "void clear_packet(uint8_t *pkt) {\n    memset(pkt, 0, sizeof(pkt)); // 버그! 버퍼 전체가 아니라 4(또는 8)바이트만 초기화됨!\n}",
       "goodExample": "void clear_packet(uint8_t *pkt, size_t pkt_len) {\n    memset(pkt, 0, pkt_len);\n}"
     },
@@ -990,9 +990,9 @@
       "severity": "Error",
       "obligation": "치명(Critical)",
       "defaultEnabled": true,
-      "title": "음수 배열 인덱스",
-      "summary": "배열에 음수 인덱스로 접근함",
-      "description": "음수 인덱스는 배열 시작 이전 메모리에 접근하므로 정의되지 않은 동작입니다.",
+      "title": "배열 시작 이전으로의 인덱스 접근",
+      "summary": "음수 인덱스 등으로 실제 배열의 시작 이전을 접근할 수 있음",
+      "description": "인덱스가 음수인지보다 실제 접근 위치가 배열 안에 있는지가 중요합니다. int a[2]; int *p = &a[1];에서 p[-1]은 a[0]을 가리켜 유효하지만 a[-1]은 배열 시작 이전을 접근하므로 정의되지 않은 동작입니다. 진단의 기준 포인터와 실제 배열 경계를 확인하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -1052,7 +1052,7 @@
       "defaultEnabled": true,
       "title": "음수 크기 배열 선언",
       "summary": "배열 크기가 음수로 선언됨",
-      "description": "음수 크기 배열 선언은 정의되지 않은 동작입니다.",
+      "description": "고정 길이 배열의 크기에 음수 상수식을 사용하면 ISO C의 제약 위반으로 진단이 필요합니다. 가변 길이 배열(VLA)은 크기를 실행 시 평가할 때 양수여야 하며, 0 이하이면 정의되지 않은 동작입니다. 상수 선언 오류와 실행 중 크기 검증 누락을 구분하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -1148,9 +1148,9 @@
       "defaultEnabled": true,
       "title": "memset 채움 값에 실수 사용",
       "summary": "memset()의 두 번째 인자로 실수 값을 전달함",
-      "description": "memset은 바이트 단위로 채우므로 실수 값의 표현은 구현 정의이며 의도한 값이 되지 않습니다.",
-      "badExample": "",
-      "goodExample": ""
+      "description": "memset의 두 번째 매개변수 타입은 int입니다. 실수 인자는 먼저 int로 변환되어 소수 부분이 버려지고, 이후 unsigned char 값으로 변환되어 각 바이트에 저장됩니다. 예를 들어 1.5를 전달하면 각 바이트가 1로 채워지며 실수 1.5의 메모리 표현이 저장되는 것이 아닙니다. 실수 값이 int로 표현 가능한 범위를 벗어나면 변환 자체가 정의되지 않은 동작일 수 있습니다. 실수 배열의 각 요소에 값을 넣으려면 요소별 대입을 사용하십시오.",
+      "badExample": "float values[4];\nmemset(values, 1.5, sizeof(values)); // 각 요소에 1.5f를 대입하는 동작이 아님",
+      "goodExample": "float values[4];\nfor (size_t i = 0; i < 4U; ++i) {\n    values[i] = 1.5f;\n}"
     },
     {
       "id": "memsetValueOutOfRange",
@@ -1411,8 +1411,8 @@
       "obligation": "치명(Critical)",
       "defaultEnabled": true,
       "title": "위치 지정 없이 읽기/쓰기 전환",
-      "summary": "같은 파일에서 fseek 등 위치 지정 없이 읽기와 쓰기를 번갈아 수행함",
-      "description": "C 표준상 갱신 모드 파일에서 읽기와 쓰기 사이에는 fflush 또는 위치 지정 함수 호출이 필요합니다.",
+      "summary": "갱신 모드 스트림에서 필요한 동기화 없이 입력과 출력을 전환함",
+      "description": "갱신 모드(r+, w+, a+ 등) 스트림에서 출력 다음에 입력을 수행하려면 fflush 또는 위치 지정 함수(fseek, fsetpos, rewind)를 사이에 호출해야 합니다. 입력 다음에 출력을 수행하려면 위치 지정 함수가 필요하며 fflush만으로는 충분하지 않습니다. 직전 입력에서 EOF를 만난 경우는 입력→출력 전환의 예외입니다. 함수 반환값과 스트림의 위치 지정 가능 여부도 확인하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -1472,7 +1472,7 @@
       "defaultEnabled": true,
       "title": "같은 파일을 읽기/쓰기로 동시에 열기",
       "summary": "같은 파일을 서로 다른 스트림으로 읽기와 쓰기 동시에 엶",
-      "description": "하나의 파일을 여러 스트림으로 동시에 읽고 쓰면 결과가 정의되지 않습니다. MISRA C 2012 Rule 22.3과 관련됩니다.",
+      "description": "같은 파일을 여러 스트림으로 열어 읽기와 쓰기를 수행하면 버퍼링과 파일 위치의 동기화 때문에 예상과 다른 결과가 생길 수 있습니다. 여러 번 여는 것 자체가 모든 경우에 ISO C의 정의되지 않은 동작인 것은 아닙니다. 타겟의 파일 시스템과 스트림 사용 규칙을 확인하십시오. MISRA C 2012 Rule 22.3은 같은 파일을 여러 스트림으로 동시에 읽기·쓰기 위해 여는 것을 제한합니다.",
       "badExample": "",
       "goodExample": ""
     },
@@ -1628,7 +1628,7 @@
       "defaultEnabled": true,
       "title": "scanf 폭이 대상 버퍼보다 큼",
       "summary": "scanf 형식의 폭이 대상 버퍼 크기보다 큼",
-      "description": "지정한 폭만큼 읽으면 대상 버퍼를 넘쳐 버퍼 오버플로가 발생합니다. 폭은 버퍼 크기 - 1 이하로 지정하십시오.",
+      "description": "scanf의 %s와 %[ 변환은 읽은 문자 뒤에 NUL을 추가하므로 필드 폭을 대상 배열의 요소 수보다 최소 1 작게 지정해야 합니다. %c는 NUL을 추가하지 않으므로 필드 폭이 대상 요소 수 이하이면 됩니다. 길이 수정자와 실제 대상 타입도 함께 확인하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -2178,9 +2178,9 @@
       "severity": "Style",
       "obligation": "권고(Advisory)",
       "defaultEnabled": true,
-      "title": "포인터가 0보다 작은지 검사",
-      "summary": "포인터를 0보다 작은지 비교함",
-      "description": "포인터는 음수가 될 수 없으므로 의미 없는 검사이거나 오류입니다.",
+      "title": "포인터와 정수 0의 잘못된 관계 비교",
+      "summary": "포인터를 정수 0과 <, <= 등의 관계 연산자로 비교함",
+      "description": "ISO C에서 포인터와 정수 0을 관계 연산자(<, <=, >, >=)로 직접 비교하는 것은 제약 위반입니다. 포인터 주소를 부호 없는 정수처럼 간주하여 항상 참 또는 거짓이라고 판단해서는 안 됩니다. NULL 여부를 확인하려면 p == NULL 또는 p != NULL을 사용하십시오. 포인터끼리의 대소 비교에도 객체 관계에 따른 제약이 있습니다.",
       "badExample": "",
       "goodExample": ""
     },
@@ -2190,9 +2190,9 @@
       "severity": "Style",
       "obligation": "권고(Advisory)",
       "defaultEnabled": true,
-      "title": "포인터가 0 이상인지 검사",
-      "summary": "포인터를 0 이상인지 비교함",
-      "description": "포인터는 음수가 될 수 없으므로 항상 참입니다. NULL 검사를 의도했다면 != NULL을 사용하십시오.",
+      "title": "포인터와 정수 0의 잘못된 관계 비교",
+      "summary": "포인터를 정수 0과 >, >= 등의 관계 연산자로 비교함",
+      "description": "ISO C에서 포인터와 정수 0을 관계 연산자로 직접 비교하는 것은 제약 위반입니다. p >= 0이 항상 참이라고 보장되지 않습니다. NULL 검사를 의도했다면 p != NULL을 사용하고, 주소 순서 비교가 필요하다면 해당 객체 관계와 타겟 구현의 규칙을 확인하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -2227,8 +2227,8 @@
       "obligation": "권고(Advisory)",
       "defaultEnabled": true,
       "title": "가변 인자 함수에 NULL 전달",
-      "summary": "가변 인자 함수의 마지막 고정 인자 뒤에 NULL을 전달함",
-      "description": "NULL이 정수 0으로 정의된 환경에서는 포인터 크기와 달라 정의되지 않은 동작이 됩니다. (void *)NULL처럼 캐스트하십시오.",
+      "summary": "포인터가 필요한 가변 인자 위치에 정수형 NULL을 전달할 수 있음",
+      "description": "가변 인자는 매개변수 타입에 맞춘 포인터 변환이 자동으로 적용되지 않습니다. NULL이 정수 0으로 정의되어 있고 수신 측이 포인터 타입으로 읽는 경우, 타입 불일치로 정의되지 않은 동작이 발생할 수 있습니다. 필요한 포인터 타입으로 변환하여 전달하십시오. 정수 인자가 필요한 위치의 0이나 NULL까지 모두 잘못된 것은 아닙니다.",
       "badExample": "",
       "goodExample": ""
     },
@@ -2672,9 +2672,9 @@
       "defaultEnabled": true,
       "title": "겹치는 strcmp 조건",
       "summary": "strcmp 결과 조건들이 서로 겹쳐 의심스러움",
-      "description": "예: strcmp(x, \"abc\") == 0 || strcmp(x, \"def\") != 0은 항상 참입니다. 조건 조합을 확인하십시오.",
-      "badExample": "",
-      "goodExample": ""
+      "description": "서로 다른 문자열과의 비교 조건이 논리적으로 중복되는지 확인하십시오. 예를 들어 strcmp(x, \"abc\") != 0 || strcmp(x, \"def\") != 0은 유효한 NUL 종료 문자열 x에 대해 항상 참입니다. x가 서로 다른 두 문자열과 동시에 같을 수 없기 때문입니다. 두 문자열 모두와 다를 때를 의도했다면 || 대신 &&를 사용하십시오.",
+      "badExample": "if (strcmp(x, \"abc\") != 0 || strcmp(x, \"def\") != 0) { /* 항상 참 */ }",
+      "goodExample": "if (strcmp(x, \"abc\") != 0 && strcmp(x, \"def\") != 0) {\n    /* x가 두 문자열 모두와 다를 때 */\n}"
     },
     {
       "id": "shiftTooManyBitsSigned",
@@ -2683,8 +2683,8 @@
       "obligation": "치명(Critical)",
       "defaultEnabled": true,
       "title": "부호 있는 값의 과도한 시프트",
-      "summary": "부호 있는 값을 부호 비트까지 시프트함",
-      "description": "부호 있는 32-bit 값을 31비트 시프트하는 등 부호 비트에 영향을 주는 시프트는 구현 정의 또는 정의되지 않은 동작입니다. MISRA C 2012 Rule 12.2와 관련됩니다.",
+      "summary": "부호 있는 정수의 왼쪽 시프트 결과가 표현 범위를 벗어날 수 있음",
+      "description": "C89~C17에서 부호 있는 정수의 왼쪽 시프트는 왼쪽 값과 결과의 표현 가능 범위를 확인해야 합니다. 음수를 왼쪽 시프트하거나, 음수가 아닌 값이라도 결과가 해당 signed 타입으로 표현되지 않으면 정의되지 않은 동작입니다. 단순히 31비트를 이동했다는 이유만으로 모든 32비트 시프트가 잘못되는 것은 아닙니다. 예를 들어 음수가 아닌 32비트 int의 오른쪽 31비트 시프트는 유효할 수 있습니다. 이동 횟수의 범위 제한(MISRA 12.2)과 결과 범위 문제를 구분하십시오.",
       "badExample": "",
       "goodExample": ""
     },
@@ -3992,9 +3992,9 @@
       "defaultEnabled": true,
       "title": "폐지된 bcopy 사용",
       "summary": "폐지된 bcopy() 함수를 사용함",
-      "description": "bcopy는 폐지되었습니다. memcpy() 또는 memmove()를 사용하십시오.",
-      "badExample": "",
-      "goodExample": ""
+      "description": "bcopy(src, dst, n)는 오래된 인터페이스입니다. 같은 복사 방향과 메모리 겹침 처리 동작을 유지하려면 memmove(dst, src, n)로 바꾸십시오. 원본과 대상의 인자 순서가 반대임에 주의해야 합니다. memcpy(dst, src, n)는 두 영역이 겹치지 않는다고 보장할 때만 사용할 수 있습니다.",
+      "badExample": "bcopy(src, dst, n); // 오래된 인터페이스: 원본이 첫 번째 인자",
+      "goodExample": "memmove(dst, src, n); // 대상이 첫 번째 인자, 겹치는 영역도 처리"
     },
     {
       "id": "clang-analyzer-security.insecureAPI.bzero",
@@ -4283,6 +4283,174 @@
       "description": "같은 함수 안에서 반드시 va_end를 호출해야 합니다. MISRA C 2012 Rule 17.1과 관련됩니다.",
       "badExample": "",
       "goodExample": ""
+    },
+    {
+      "id": "wrongfeofUsage",
+      "category": "구문 및 환경",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "EOF 검사에 의존하는 읽기 반복문",
+      "summary": "feof를 읽기 성공 여부 대신 반복 조건으로 사용함",
+      "description": "feof는 파일 끝 때문에 읽기가 실패한 뒤 설정됩니다. 읽기 전에 !feof(fp)만 검사하면 마지막 성공 이후에도 본문이 실행되어 이전 데이터나 실패 결과를 처리할 수 있습니다. fgets·fread·fscanf 등의 반환값으로 실제 읽기 성공을 검사하고 EOF와 입출력 오류를 구분하십시오.",
+      "badExample": "while (!feof(fp)) {\n    fgets(line, sizeof(line), fp);\n    process(line);\n}",
+      "goodExample": "while (fgets(line, sizeof(line), fp) != NULL) {\n    process(line);\n}\nif (ferror(fp)) { /* 읽기 오류 처리 */ }"
+    },
+    {
+      "id": "fcloseInLoopCondition",
+      "category": "구문 및 환경",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "반복 조건에서 파일 스트림 닫기",
+      "summary": "반복 조건 평가 때마다 fclose로 스트림을 닫을 수 있음",
+      "description": "fclose는 호출 자체가 스트림을 닫습니다. 반환값은 반복을 계속할 조건이 아니라 닫기 성공 여부입니다. 조건으로 사용하면 본문이 실행되지 않거나 이미 닫힌 스트림을 다시 닫을 수 있습니다. 한 번 닫고 반환값을 별도로 처리하십시오.",
+      "badExample": "while (fclose(fp) != 0) { /* 닫힌 스트림에 재호출 가능 */ }",
+      "goodExample": "int result = fclose(fp);\nfp = NULL;\nif (result != 0) { /* 닫기 실패 처리 */ }"
+    },
+    {
+      "id": "ftellTextModeFile",
+      "category": "구문 및 환경",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "텍스트 스트림 위치를 바이트 수로 해석",
+      "summary": "텍스트 모드 파일의 ftell 위치 값에 대한 이식성 검토가 필요함",
+      "description": "텍스트 스트림의 ftell 반환값은 휴대 가능한 바이트 개수나 문자열 길이가 아닙니다. 구현에 따라 위치 정보를 인코딩한 값일 수 있으므로 값의 차이로 읽은 바이트 수를 계산하지 마십시오. 위치를 보관·복원하려면 성공 여부를 검사한 fgetpos/fsetpos 등을 사용하고 바이트 수가 필요하면 실제 읽기 개수를 누적하십시오.",
+      "badExample": "long begin = ftell(fp);\nread_text(fp);\nlong bytes = ftell(fp) - begin; // 텍스트 스트림의 바이트 수로 보장되지 않음",
+      "goodExample": "fpos_t saved;\nif (fgetpos(fp, &saved) == 0) {\n    read_text(fp);\n    if (fsetpos(fp, &saved) != 0) { /* 위치 복원 실패 처리 */ }\n} else { /* 위치 저장 실패 처리 */ }"
+    },
+    {
+      "id": "ignoredReturnErrorCode",
+      "category": "제어 흐름 및 품질",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "오류 상태 반환값 미사용",
+      "summary": "함수가 반환한 오류 상태 코드를 확인하지 않음",
+      "description": "라이브러리 설정상 오류 상태를 반환하는 함수의 결과를 사용하지 않았습니다. 실패한 뒤에도 후속 처리가 계속될 수 있으므로 원문에 표시된 함수의 성공·실패 반환 규약을 확인하고 처리하십시오. 함수마다 성공 값이 다르므로 일괄적으로 0 또는 양수만 검사해서는 안 됩니다.",
+      "badExample": "remove(path); // 실패 여부를 확인하지 않음",
+      "goodExample": "if (remove(path) != 0) {\n    /* 파일 제거 실패 처리 */\n}"
+    },
+    {
+      "id": "allocaCalled",
+      "category": "메모리 및 포인터",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "가변 크기 스택 할당 사용",
+      "summary": "alloca로 실행 중 크기가 결정되는 스택 메모리를 할당함",
+      "description": "alloca는 ISO C 표준 함수가 아니며, 큰 크기나 반복 호출로 스택을 고갈시킬 수 있습니다. 수명과 지원 여부도 타겟 구현에 의존합니다. 가능한 경우 크기가 제한된 버퍼를 사용하고 입력 크기가 그 용량을 넘지 않는지 확인하십시오.",
+      "badExample": "unsigned char *buffer = alloca(n); // 입력 크기에 따라 스택 고갈 가능",
+      "goodExample": "unsigned char buffer[256];\nif (n <= sizeof(buffer)) {\n    process_bytes(buffer, n);\n} else { /* 용량 초과 처리 */ }"
+    },
+    {
+      "id": "intToPointerCast",
+      "category": "타입 및 형변환",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "0이 아닌 정수 리터럴의 포인터 변환",
+      "summary": "10진·8진·2진 정수 리터럴을 주소로 해석하는 변환을 검토함",
+      "description": "정수 리터럴을 포인터로 바꾸면 타겟의 주소 공간·정렬·매핑에 맞지 않을 수 있습니다. 이 Cppcheck 검사는 특히 0이 아닌 10진·8진·2진 리터럴을 지적합니다. 16진수로 표기만 바꿔도 변환 자체의 안전성이 보장되지는 않습니다. 실제 객체 접근이 목적이면 객체 주소를 사용하고, 불가피한 레지스터 주소는 타겟 검증과 프로젝트 예외 절차로 관리하십시오.",
+      "badExample": "uint32_t *p = (uint32_t *)1234; // 실제 유효 객체 주소인지 불명확",
+      "goodExample": "/* 일반 객체 접근이 목적일 때 */\nuint32_t value = 0U;\nuint32_t *p = &value;"
+    },
+    {
+      "id": "suspiciousFloatingPointCast",
+      "category": "타입 및 형변환",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "중간 실수 캐스트에 의한 정밀도 손실",
+      "summary": "더 좁은 실수형으로 캐스팅한 결과를 다시 넓게 사용하는지 확인함",
+      "description": "double/long double 값을 float 등으로 명시적 축소한 뒤 다시 더 넓은 타입 문맥에서 사용하면 중간 반올림 손실을 복원하지 못합니다. 축소가 의도된 동작이면 그 정밀도 요구를 확인하고, 불필요한 캐스트라면 제거하십시오.",
+      "badExample": "double result = (float)value; // value가 double이면 중간에서 정밀도를 잃음",
+      "goodExample": "double result = value; // value가 double이고 축소가 불필요한 경우"
+    },
+    {
+      "id": "unreachableSwitchCase",
+      "category": "제어 흐름 및 품질",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "선택될 수 없는 switch case",
+      "summary": "이미 알려진 switch 조건 값과 맞지 않아 case가 선택되지 않음",
+      "description": "분석 경로에서 switch 조건 값이 이미 알려져 있어 해당 case가 진입점으로 선택되지 않습니다. 의도적인 상수 분기인지, 앞선 대입·조건 때문에 다른 상태를 처리하지 못하는지 확인하십시오. 인접 case에서의 fall-through 가능성과 전체 제어 흐름도 함께 검토해야 합니다.",
+      "badExample": "int mode = 1;\nswitch (mode) {\ncase 1: work_a(); break;\ncase 2: work_b(); break;\n}",
+      "goodExample": "/* 입력 상태에 따라 분기하려는 설계라면 */\nint mode = read_mode();\nswitch (mode) {\ncase 1: work_a(); break;\ncase 2: work_b(); break;\ndefault: handle_unknown_mode(); break;\n}"
+    },
+    {
+      "id": "redundantContinue",
+      "category": "제어 흐름 및 품질",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "반복문 끝의 불필요한 continue",
+      "summary": "반복문 본문의 마지막 continue가 제어 흐름을 바꾸지 않음",
+      "description": "본문의 마지막 continue는 본문 끝에 도달한 것과 같은 다음 반복 동작을 수행합니다. 불필요한 제어문인지 확인한 뒤 제거해 흐름을 단순하게 표현할 수 있습니다. 중첩 반복문에서는 어느 반복문에 속한 continue인지 확인하십시오.",
+      "badExample": "for (int i = 0; i < count; ++i) {\n    process(i);\n    continue;\n}",
+      "goodExample": "for (int i = 0; i < count; ++i) {\n    process(i);\n}"
+    },
+    {
+      "id": "sizeofDereferencedVoidPointer",
+      "category": "산술 및 연산",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "void 포인터 역참조에 대한 sizeof",
+      "summary": "완전한 객체 타입이 없는 void에 sizeof를 적용함",
+      "description": "void *를 역참조한 식의 타입은 void입니다. sizeof는 완전한 객체 타입을 요구하므로 sizeof(*p)는 p가 void *인 경우 ISO C의 제약 위반입니다. 일부 컴파일러 확장이 1을 반환해도 가리키는 버퍼 크기를 뜻하지 않습니다. 실제 데이터 타입이나 별도로 전달한 바이트 수를 사용하십시오.",
+      "badExample": "void clear(void *p) {\n    memset(p, 0, sizeof(*p)); // void의 크기로 버퍼 크기를 알 수 없음\n}",
+      "goodExample": "void clear(void *p, size_t bytes) {\n    memset(p, 0, bytes); // 호출자가 유효한 버퍼 용량을 전달해야 함\n}"
+    },
+    {
+      "id": "staticStringCompare",
+      "category": "제어 흐름 및 품질",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "결과가 고정된 문자열 비교",
+      "summary": "고정 문자열끼리 비교하여 결과가 이미 정해져 있음",
+      "description": "문자열 리터럴 등 내용이 고정된 문자열을 서로 비교하면 결과가 상수입니다. 실제 입력 변수를 비교하려던 오타인지 확인하십시오. 의도된 상수 조건이라면 불필요한 비교와 분기를 정리할 수 있습니다.",
+      "badExample": "if (strcmp(\"ON\", \"OFF\") == 0) {\n    activate(); // 이 조건은 거짓\n}",
+      "goodExample": "/* 실제 입력과 비교하려는 의도일 때 */\nif (strcmp(input, \"ON\") == 0) {\n    activate();\n}"
+    },
+    {
+      "id": "staticFunction",
+      "category": "제어 흐름 및 품질",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "파일 내부 함수의 연결 범위 제한",
+      "summary": "현재 번역 단위에서만 사용하는 함수에 static 연결을 검토함",
+      "description": "다른 번역 단위에서 사용되지 않는 함수를 static으로 선언하면 이름의 외부 노출과 충돌 가능성을 줄일 수 있습니다. 분석에 포함되지 않은 외부 코드, 콜백 등록, 어셈블리·링커 참조 등이 있는지 확인한 뒤 선언과 정의의 연결을 일관되게 변경하십시오.",
+      "badExample": "void local_helper(void) { /* 이 소스에서만 사용 */ }",
+      "goodExample": "static void local_helper(void) { /* 외부 참조가 없음을 확인한 경우 */ }"
+    },
+    {
+      "id": "uninitStructMember",
+      "category": "메모리 및 포인터",
+      "severity": "Error",
+      "obligation": "치명(Critical)",
+      "defaultEnabled": true,
+      "title": "초기화되지 않은 구조체 멤버 사용",
+      "summary": "값을 대입하지 않은 구조체 멤버를 읽는 경로가 있음",
+      "description": "구조체 전체가 아니라 일부 멤버만 초기화된 상태에서 나머지 멤버를 읽을 수 있습니다. 멤버별 초기화와 제어 경로를 확인하십시오. 자동 저장 기간의 객체인지, 동적 할당 영역인지도 구분해야 하며 구조체가 존재한다는 사실만으로 모든 멤버 값이 유효해지지는 않습니다.",
+      "badExample": "struct State { int ready; int count; };\nstruct State s;\ns.ready = 1;\nuse_count(s.count); // count 미초기화",
+      "goodExample": "struct State { int ready; int count; };\nstruct State s = {0};\ns.ready = 1;\nuse_count(s.count);"
+    },
+    {
+      "id": "funcArgOrderDifferent",
+      "category": "제어 흐름 및 품질",
+      "severity": "Warning",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "함수 선언·정의의 매개변수 순서 불일치",
+      "summary": "선언과 정의에서 대응하는 매개변수 이름의 순서가 다름",
+      "description": "같은 함수의 선언과 정의에서 이름의 순서가 다르면 호출자가 인자의 의미를 반대로 이해할 수 있습니다. 타입이 같으면 컴파일 오류 없이 전달되어 논리 오류로 이어질 수 있으므로 선언·정의·호출부의 의미를 함께 확인하십시오.",
+      "badExample": "void set_range(int low, int high);\nvoid set_range(int high, int low) { /* 선언과 의미가 뒤바뀜 */ }",
+      "goodExample": "void set_range(int low, int high);\nvoid set_range(int low, int high) { /* 선언·정의의 의미를 일치시킴 */ }"
     }
   ]
 }

@@ -42,6 +42,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CodeLineViewModel> CurrentFileLines { get; } = new();
     public ObservableCollection<AnalysisIssue> FilteredDefects { get; } = new();
+    public ObservableCollection<RuleIssueGroup> RuleIssueGroups { get; } = new();
     public ObservableCollection<AnalysisIssue> NotesAndInfos { get; } = new();
     public ObservableCollection<SuppressedIssueEntry> SuppressedIssues { get; } = new();
     public ObservableCollection<string> DefectCategoryFilters { get; } = new()
@@ -175,6 +176,8 @@ public class MainViewModel : INotifyPropertyChanged
 
     public string RulesetButtonText => $"⚙ 검사 규칙 설정 ({AllRules.Count(r => r.IsEnabled)}/{AllRules.Count})";
     public string DefectsTabHeader => $"🚨 결함 및 규칙 위반 ({FilteredDefects.Count})";
+    public string RuleSummaryTabHeader => $"📊 규칙별 요약 ({RuleIssueGroups.Count}개)";
+    public string RuleSummaryStatusText => $"{RuleIssueGroups.Count}개 규칙 · {FilteredDefects.Count}건 (현재 검색·분류·예외 처리 기준)";
     public string NotesTabHeader => $"ℹ️ 노트 / 누락 파일 안내 ({NotesAndInfos.Count})";
     public string SuppressedTabHeader => $"🔇 예외(무시) 항목 ({SuppressedIssues.Count})";
     public string TargetFilesSummary => "검사대상 코드";
@@ -216,14 +219,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
         foreach (var r in rules)
         {
-            r.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(RuleInfo.IsEnabled))
-                {
-                    OnPropertyChanged(nameof(RulesetButtonText));
-                }
-            };
-            AllRules.Add(r);
+            AddRule(r);
         }
 
         // 초기 샘플 코드가 존재하면 바로 테스트할 수 있도록 로드
@@ -273,6 +269,7 @@ public class MainViewModel : INotifyPropertyChanged
         _allRawDefects.Clear();
         _coverageByFile.Clear();
         FilteredDefects.Clear();
+        RuleIssueGroups.Clear();
         NotesAndInfos.Clear();
         SuppressedIssues.Clear();
         CurrentFileLines.Clear();
@@ -652,6 +649,19 @@ public class MainViewModel : INotifyPropertyChanged
 
     public void RefreshFilteredDefects()
     {
+        // 엔진이 보고한 미등록 ID도 기본 ON으로 목록에 추가해 필터에서 유실되지 않게 한다.
+        var knownRules = AllRules.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
+        foreach (var issue in _allRawDefects)
+        {
+            if (!knownRules.TryGetValue(issue.RuleId, out var rule))
+            {
+                rule = issue.RuleDetails ?? RuleInfo.CreateUnregistered(issue.RuleId, issue.Severity);
+                AddRule(rule);
+                knownRules.Add(rule.Id, rule);
+            }
+            issue.RuleDetails = rule;
+        }
+
         var suppressedKeys = SuppressedIssues.Select(s => s.SuppressionKey).ToHashSet();
         var enabledRuleIds = AllRules.Where(r => r.IsEnabled).Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -683,6 +693,15 @@ public class MainViewModel : INotifyPropertyChanged
             }
 
             FilteredDefects.Add(d);
+        }
+
+        var expandedRules = RuleIssueGroups.ToDictionary(g => g.RuleId, g => g.IsExpanded, StringComparer.OrdinalIgnoreCase);
+        RuleIssueGroups.Clear();
+        foreach (var group in RuleSummaryBuilder.Build(FilteredDefects))
+        {
+            if (expandedRules.TryGetValue(group.RuleId, out bool expanded))
+                group.IsExpanded = expanded;
+            RuleIssueGroups.Add(group);
         }
 
         UpdateTreeDefectBadges();
@@ -874,6 +893,13 @@ public class MainViewModel : INotifyPropertyChanged
         ForceAllIfdefConfigs = model.ForceAllIfdefConfigs;
         EnableClangTidy = model.EnableClangTidy;
 
+        // DB에 없는 ID도 프로젝트에 저장된 ON/OFF 선택을 재분석 전에 복원한다.
+        var savedIds = model.EnabledRuleIds.Concat(model.DisabledRuleIds ?? Enumerable.Empty<string>())
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase);
+        var knownIds = AllRules.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string id in savedIds)
+            if (knownIds.Add(id)) AddRule(RuleInfo.CreateUnregistered(id));
+
         if (model.DisabledRuleIds != null)
         {
             // 저장 당시 켜짐/꺼짐 목록에 있는 규칙은 그대로 복원하고,
@@ -1005,10 +1031,24 @@ public class MainViewModel : INotifyPropertyChanged
         return roots.SelectMany(r => r.EnumerateFiles()).Count();
     }
 
+    private void AddRule(RuleInfo rule)
+    {
+        rule.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RuleInfo.IsEnabled))
+                OnPropertyChanged(nameof(RulesetButtonText));
+        };
+        AllRules.Add(rule);
+        if (!string.IsNullOrWhiteSpace(rule.Category) && !DefectCategoryFilters.Contains(rule.Category))
+            DefectCategoryFilters.Add(rule.Category);
+    }
+
     public void NotifyCountsChanged()
     {
         OnPropertyChanged(nameof(RulesetButtonText));
         OnPropertyChanged(nameof(DefectsTabHeader));
+        OnPropertyChanged(nameof(RuleSummaryTabHeader));
+        OnPropertyChanged(nameof(RuleSummaryStatusText));
         OnPropertyChanged(nameof(NotesTabHeader));
         OnPropertyChanged(nameof(SuppressedTabHeader));
         OnPropertyChanged(nameof(TargetFilesSummary));

@@ -12,7 +12,26 @@ public class MisraAndTypeAnalyzer
 
     private static readonly HashSet<string> StdioFunctions = new(StringComparer.Ordinal)
     {
-        "printf", "scanf", "sprintf", "sscanf", "fopen", "fclose", "fprintf", "fscanf", "gets", "puts"
+        "remove", "rename", "tmpfile", "tmpnam", "fclose", "fflush", "fopen", "freopen",
+        "setbuf", "setvbuf", "fprintf", "fscanf", "printf", "scanf", "sprintf", "sscanf",
+        "vfprintf", "vprintf", "vsprintf", "fgetc", "fgets", "fputc", "fputs", "getc",
+        "getchar", "gets", "putc", "putchar", "puts", "ungetc", "fread", "fwrite",
+        "fgetpos", "fseek", "ftell", "fsetpos", "rewind", "clearerr", "feof", "ferror", "perror",
+        "snprintf", "vfscanf", "vscanf", "vsnprintf", "vsscanf",
+        "fwprintf", "fwscanf", "swprintf", "swscanf", "vfwprintf", "vfwscanf", "vswprintf",
+        "vswscanf", "vwprintf", "vwscanf", "wprintf", "wscanf", "fgetwc", "fgetws", "fputwc",
+        "fputws", "fwide", "getwc", "getwchar", "putwc", "putwchar", "ungetwc",
+        "wcstod", "wcstof", "wcstold", "wcstol", "wcstoll", "wcstoul", "wcstoull",
+        "wcscpy", "wcsncpy", "wmemcpy", "wmemmove", "wcscat", "wcsncat", "wcscmp", "wcscoll",
+        "wcsncmp", "wcsxfrm", "wmemcmp", "wcschr", "wcscspn", "wcspbrk", "wcsrchr", "wcsspn",
+        "wcsstr", "wcstok", "wmemchr", "wcslen", "wmemset", "wcsftime", "btowc", "wctob",
+        "mbsinit", "mbrlen", "mbrtowc", "wcrtomb", "mbsrtowcs", "wcsrtombs",
+        "tmpfile_s", "tmpnam_s", "fopen_s", "freopen_s", "fprintf_s", "fscanf_s", "printf_s",
+        "scanf_s", "snprintf_s", "sprintf_s", "sscanf_s", "vfprintf_s", "vfscanf_s", "vsprintf_s",
+        "vsscanf_s", "gets_s", "fwprintf_s", "fwscanf_s", "snwprintf_s", "swprintf_s", "swscanf_s",
+        "vfwprintf_s", "vfwscanf_s", "vsnwprintf_s", "vswprintf_s", "vswscanf_s", "vwprintf_s",
+        "vwscanf_s", "wprintf_s", "wscanf_s", "wcscpy_s", "wcsncpy_s", "wmemcpy_s", "wmemmove_s",
+        "wcscat_s", "wcsncat_s", "wcstok_s", "wcsnlen_s", "wcrtomb_s", "mbsrtowcs_s", "wcsrtombs_s"
     };
 
     public List<AnalysisIssue> Analyze(
@@ -38,7 +57,7 @@ public class MisraAndTypeAnalyzer
                 if (dir.Str.StartsWith("#undef", StringComparison.Ordinal))
                 {
                     AddIssue(issues, emittedKeys, rulesById, "misra-c2012-20.5", dir.File, dir.LineNr, 1,
-                        $"전처리기 지시문 '{dir.Str}'이 사용되었습니다. 매크로 재정의/해제(#undef)는 지양해야 합니다.");
+                        $"전처리기 지시문 '{dir.Str}'이 사용되었습니다. 매크로를 해제하는 #undef 지시문 사용은 지양해야 합니다.");
                 }
             }
 
@@ -47,6 +66,8 @@ public class MisraAndTypeAnalyzer
 
             // 2-1. 함수 선언/정의의 매개변수 프로토타입 형식 검사 (MISRA 8.2)
             AnalyzeFunctionPrototypes(unit, targetFilesNormalized, rulesById, issues, emittedKeys);
+
+            AnalyzeRecursion(unit, targetFilesNormalized, rulesById, issues, emittedKeys);
 
             // 3. 토큰 및 AST 순회 검사
             foreach (var tok in unit.Tokens)
@@ -101,7 +122,7 @@ public class MisraAndTypeAnalyzer
 
                 // 3.8 이항 산술/비교 연산자의 부호 불일치 검사: MISRA 10.4
                 if (tok.AstOperand1 != null && tok.AstOperand2 != null &&
-                    (tok.IsComparisonOp || tok.Str is "+" or "-" or "*" or "/" or "%"))
+                    (tok.IsComparisonOp || tok.Str is "+" or "-" or "*" or "/" or "%" or "&" or "|" or "^" or "+=" or "-=" or ":"))
                 {
                     AnalyzeBinarySignMismatch(tok, platform, rulesById, issues, emittedKeys);
                 }
@@ -123,7 +144,7 @@ public class MisraAndTypeAnalyzer
                     if (ContainsSideEffect(tok.Next.AstOperand2))
                     {
                         AddIssue(issues, emittedKeys, rulesById, "misra-c2012-13.6", tok.File, tok.LineNr, tok.Column,
-                            "'sizeof' 연산자의 피연산자에 실행되지 않는 부작용(증감 연산 또는 함수 호출)이 포함되어 있습니다.");
+                            "'sizeof' 피연산자에 증감·대입 연산 또는 함수 호출이 포함되어 있습니다. 피연산자는 보통 평가되지 않지만 VLA 관련 코드에서는 평가 여부가 달라질 수 있으므로 부작용을 별도 문장으로 분리하십시오.");
                     }
                 }
 
@@ -138,12 +159,13 @@ public class MisraAndTypeAnalyzer
                     if (cond.ValueType != "bool" && !cond.IsComparisonOp && cond.Str is not ("!" or "&&" or "||"))
                     {
                         AddIssue(issues, emittedKeys, rulesById, "misra-c2012-14.4", tok.File, tok.LineNr, tok.Column,
-                            $"'{tok.Str}' 문의 조건식('{cond.Str}')이 명시적인 Boolean 비교식(!= 0, != NULL 등)이 아닙니다.");
+                            $"'{tok.Str}' 문의 조건식('{cond.Str}')이 필수 Boolean 타입으로 판정되지 않았습니다. bool 값이나 의도가 분명한 비교식(!= 0, != NULL 등)을 사용하십시오.");
                     }
                 }
 
-                // 3.12 매개변수 증감 수정 검사 (MISRA 17.8)
-                if (tok.Str is "++" or "--" or "+=" or "-=" && tok.AstOperand1?.Variable?.Access == "Argument")
+                // 3.12 모든 대입 연산 및 증감에 의한 매개변수 수정 검사 (MISRA 17.8)
+                if ((tok.IsAssignmentOp || tok.Str is "++" or "--") &&
+                    !tok.IsSplittedVarDeclEq && tok.AstOperand1?.Variable?.Access == "Argument")
                 {
                     AddIssue(issues, emittedKeys, rulesById, "misra-c2012-17.8", tok.File, tok.LineNr, tok.Column,
                         $"함수 매개변수 '{tok.AstOperand1.Str}'의 값을 직접 변경하고 있습니다.");
@@ -171,16 +193,13 @@ public class MisraAndTypeAnalyzer
                 "대입 연산자('=')의 결과값을 다른 수식이나 조건식 내부에서 직접 사용하고 있습니다.");
         }
 
-        // MISRA 17.8: 함수 매개변수 직접 재할당
-        if (!eqTok.IsSplittedVarDeclEq && lhs.Variable?.Access == "Argument")
+        // 캐스트 결과에서 대입 대상까지의 변환은 캐스트 자체와 별도로 검사한다.
+        if (lhs.ValuePointer > 0 && lhs.ValueType != "void" &&
+            rhs.ValuePointer == lhs.ValuePointer && rhs.ValueType == "void")
         {
-            AddIssue(issues, emittedKeys, rulesById, "misra-c2012-17.8", eqTok.File, eqTok.LineNr, eqTok.Column,
-                $"함수 매개변수 '{lhs.Str}'에 새로운 값을 직접 대입하고 있습니다.");
+            AddIssue(issues, emittedKeys, rulesById, "misra-c2012-11.5", eqTok.File, eqTok.LineNr, eqTok.Column,
+                $"'void*' 포인터에서 객체 포인터('{lhs.FormatTypeDisplay(platform)}')로 암묵적으로 변환했습니다.");
         }
-
-        // 우변에 명시적 캐스트가 있는 경우는 암묵적 변환 검사에서 제외 (명시적 캐스트는 AnalyzeExplicitCast에서 처리)
-        if (rhs.IsCast)
-            return;
 
         // MISRA 필수 타입(Essential Type) 기준 비교: 정수 승격 결과(int)가 아닌 원래 타입으로 판정
         var lhsType = EssentialTypeResolver.Resolve(lhs, platform);
@@ -206,9 +225,6 @@ public class MisraAndTypeAnalyzer
         HashSet<string> emittedKeys)
     {
         var expr = retTok.AstOperand1!;
-        if (expr.IsCast)
-            return;
-
         // return 토큰의 값 타입은 함수의 선언된 반환형
         var retType = EssentialTypeResolver.FromValueType(retTok, platform, isPlainChar: false);
         var exprType = EssentialTypeResolver.Resolve(expr, platform);
@@ -336,7 +352,7 @@ public class MisraAndTypeAnalyzer
             if (srcIsPtr && !targetIsPtr && targetBits > 0 && targetBits < platform.PointerBit)
             {
                 AddIssue(issues, emittedKeys, rulesById, "pointerSizeMismatch", castTok.File, castTok.LineNr, castTok.Column,
-                    $"포인터 주소 절삭 위험: {platform.PointerBit}-bit 포인터를 더 작은 {targetBits}-bit 정수형으로 변환하면 상위 주소 비트가 손실됩니다.");
+                    $"포인터 주소 표현 범위 위험: {platform.PointerBit}-bit 포인터를 더 작은 {targetBits}-bit 정수형으로 변환하고 있습니다. 주소를 대상 정수형으로 표현할 수 없으면 정의되지 않은 동작이 발생할 수 있습니다.");
             }
             return;
         }
@@ -402,36 +418,15 @@ public class MisraAndTypeAnalyzer
         }
 
         // 2) MISRA 21.6: 표준 입출력 함수 사용 금지
-        if (StdioFunctions.Contains(funcName))
+        if (StdioFunctions.Contains(funcName) && funcTok.Variable == null &&
+            (string.IsNullOrEmpty(funcTok.FunctionId) ||
+             !unit.FunctionById.TryGetValue(funcTok.FunctionId, out var stdioFunc) || stdioFunc.Token == null))
         {
             AddIssue(issues, emittedKeys, rulesById, "misra-c2012-21.6", funcTok.File, funcTok.LineNr, funcTok.Column,
                 $"표준 입출력 라이브러리 함수 '{funcName}()'가 사용되었습니다.");
         }
 
-        // 3) MISRA 17.2: 함수 직접 재귀 호출 검사
-        if (!string.IsNullOrEmpty(funcTok.FunctionId) &&
-            !string.IsNullOrEmpty(funcTok.ScopeId) &&
-            unit.ScopeById.TryGetValue(funcTok.ScopeId, out var scope))
-        {
-            var curScope = scope;
-            while (curScope != null)
-            {
-                if (curScope.Type == "Function")
-                {
-                    if (curScope.FunctionId == funcTok.FunctionId || curScope.ClassName == funcName)
-                    {
-                        AddIssue(issues, emittedKeys, rulesById, "misra-c2012-17.2", funcTok.File, funcTok.LineNr, funcTok.Column,
-                            $"함수 '{funcName}()'가 자기 자신을 재귀 호출(Recursion)하고 있습니다.");
-                    }
-                    break;
-                }
-                curScope = !string.IsNullOrEmpty(curScope.NestedInId) && unit.ScopeById.TryGetValue(curScope.NestedInId, out var parent)
-                    ? parent
-                    : null;
-            }
-        }
-
-        // 4) 함수 인자 전달 시 암묵적 축소/부호 변환 (MISRA 10.3: 인자 전달은 매개변수로의 대입과 동일)
+        // 3) 함수 인자 전달 시 암묵적 축소/부호 변환 (MISRA 10.3: 인자 전달은 매개변수로의 대입과 동일)
         if (!string.IsNullOrEmpty(funcTok.FunctionId) &&
             unit.FunctionById.TryGetValue(funcTok.FunctionId, out var func) &&
             openParenTok.AstOperand2 != null)
@@ -442,7 +437,7 @@ public class MisraAndTypeAnalyzer
             {
                 var argExpr = callArgs[i];
                 var param = func.Args[i];
-                if (param == null || argExpr.IsCast)
+                if (param == null)
                     continue;
 
                 var paramType = EssentialTypeResolver.ResolveParameter(param, platform);
@@ -462,13 +457,72 @@ public class MisraAndTypeAnalyzer
             }
         }
 
-        // 5) MISRA 17.7: 반환값이 있는 함수의 결과값 무시
+        // 4) MISRA 17.7: 반환값이 있는 함수의 결과값 무시
         bool returnsValue = (!string.IsNullOrEmpty(openParenTok.ValueType) && openParenTok.ValueType != "void") ||
                             openParenTok.ValuePointer > 0;
         if (returnsValue && openParenTok.AstParent == null)
         {
             AddIssue(issues, emittedKeys, rulesById, "misra-c2012-17.7", funcTok.File, funcTok.LineNr, funcTok.Column,
                 $"함수 '{funcName}()'의 반환값('{openParenTok.ValueType}')이 확인되지 않고 무시되었습니다.");
+        }
+    }
+
+    private static void AnalyzeRecursion(
+        DumpCfgUnit unit,
+        HashSet<string> targetFilesNormalized,
+        Dictionary<string, RuleInfo> rulesById,
+        List<AnalysisIssue> issues,
+        HashSet<string> emittedKeys)
+    {
+        var calls = new List<(DumpToken Token, string Caller, string Callee)>();
+        var graph = new Dictionary<string, HashSet<string>>();
+        // 참조 파일의 함수도 호출 그래프에 포함하고, 보고 위치만 검사 대상으로 제한한다.
+        foreach (var token in unit.Tokens)
+        {
+            if (token.Str != "(" || token.IsCast || token.AstOperand1 is not { Type: "name" } name ||
+                name.Variable != null || string.IsNullOrEmpty(name.FunctionId))
+                continue;
+
+            var scopeId = name.ScopeId;
+            var visitedScopes = new HashSet<string>();
+            while (visitedScopes.Add(scopeId) && unit.ScopeById.TryGetValue(scopeId, out var scope))
+            {
+                if (scope.Type == "Function")
+                {
+                    if (!string.IsNullOrEmpty(scope.FunctionId))
+                    {
+                        calls.Add((name, scope.FunctionId, name.FunctionId));
+                        if (!graph.TryGetValue(scope.FunctionId, out var edges))
+                            graph[scope.FunctionId] = edges = new HashSet<string>();
+                        edges.Add(name.FunctionId);
+                    }
+                    break;
+                }
+                scopeId = scope.NestedInId;
+            }
+        }
+
+        bool CanReach(string from, string target)
+        {
+            var pending = new Stack<string>();
+            var visited = new HashSet<string>();
+            pending.Push(from);
+            while (pending.TryPop(out var function))
+            {
+                if (function == target)
+                    return true;
+                if (visited.Add(function) && graph.TryGetValue(function, out var edges))
+                    foreach (var next in edges)
+                        pending.Push(next);
+            }
+            return false;
+        }
+
+        foreach (var (token, caller, callee) in calls)
+        {
+            if (IsInTargetFiles(token.File, targetFilesNormalized) && CanReach(callee, caller))
+                AddIssue(issues, emittedKeys, rulesById, "misra-c2012-17.2", token.File, token.LineNr, token.Column,
+                    $"함수 '{token.Str}()' 호출이 직접 또는 간접 재귀 호출 경로에 포함되어 있습니다.");
         }
     }
 
@@ -603,15 +657,19 @@ public class MisraAndTypeAnalyzer
         // MISRA 10.1: 필수 타입이 부호 있는(signed) 피연산자에 비트 연산 수행 금지 (정수 승격 결과가 아닌 필수 타입 기준)
         var op1Type = EssentialTypeResolver.Resolve(op1, platform);
         var op2Type = EssentialTypeResolver.Resolve(op2, platform);
-        if (op1 != null && op1Type?.Category == EssentialCategory.Signed && !IsNonNegativeConstant(op1))
+        bool isShift = tok.Str is "<<" or ">>";
+        bool invalidLeft = op1Type != null && (isShift
+            ? op1Type.Value.Category != EssentialCategory.Unsigned
+            : op1Type.Value.Category is EssentialCategory.Character or EssentialCategory.Boolean ||
+              (op1Type.Value.Category == EssentialCategory.Signed && !IsNonNegativeConstant(op1!)));
+        bool invalidRight = op2Type != null && (isShift
+            ? op2Type.Value.Category != EssentialCategory.Unsigned && !op2!.IsIntLiteral
+            : op2Type.Value.Category is EssentialCategory.Character or EssentialCategory.Boolean ||
+              (op2Type.Value.Category == EssentialCategory.Signed && !IsNonNegativeConstant(op2!)));
+        if (invalidLeft || invalidRight)
         {
             AddIssue(issues, emittedKeys, rulesById, "misra-c2012-10.1", tok.File, tok.LineNr, tok.Column,
-                $"필수 타입이 부호 있는 정수('{op1.Str}', {op1Type.Value.Display})인 피연산자에 비트 연산자('{tok.Str}')를 사용했습니다. 부호 없는(unsigned) 타입을 사용하십시오.");
-        }
-        else if (op2 != null && tok.Str is "&" or "|" or "^" && op2Type?.Category == EssentialCategory.Signed && !IsNonNegativeConstant(op2))
-        {
-            AddIssue(issues, emittedKeys, rulesById, "misra-c2012-10.1", tok.File, tok.LineNr, tok.Column,
-                $"필수 타입이 부호 있는 정수('{op2.Str}', {op2Type.Value.Display})인 피연산자에 비트 연산자('{tok.Str}')를 사용했습니다.");
+                $"연산자 '{tok.Str}'의 피연산자에 허용되지 않는 필수 타입이 사용되었습니다. 부호 없는(unsigned) 타입을 사용하십시오.");
         }
 
         // MISRA 12.2: 시프트 비트 폭 범위 확인 (좌변 필수 타입의 비트 폭 기준)
@@ -630,11 +688,25 @@ public class MisraAndTypeAnalyzer
 
         // MISRA 12.1: 비트 연산(&, |, ^)과 비교 연산자 혼합 시 괄호 누락
         if (tok.Str is "&" or "|" or "^" &&
-            ((op1 != null && op1.IsComparisonOp) || (op2 != null && op2.IsComparisonOp)))
+            ((op1?.IsComparisonOp == true && HasNoParenthesesBetween(op1, tok)) ||
+             (op2?.IsComparisonOp == true && HasNoParenthesesBetween(tok, op2))))
         {
             AddIssue(issues, emittedKeys, rulesById, "misra-c2012-12.1", tok.File, tok.LineNr, tok.Column,
                 $"비트 연산자('{tok.Str}')와 비교 연산자가 괄호 없이 함께 사용되어 비교 연산이 먼저 수행됩니다. 괄호로 우선순위를 명시하십시오.");
         }
+    }
+
+    // misra.py numberOfParentheses와 동일하게 AST 사이의 실제 토큰을 확인한다.
+    private static bool HasNoParenthesesBetween(DumpToken start, DumpToken end)
+    {
+        for (var token = start; token != null; token = token.Next)
+        {
+            if (token == end)
+                return true;
+            if (token.Str is "(" or ")")
+                return false;
+        }
+        return false;
     }
 
     private static void AnalyzeBinarySignMismatch(
@@ -657,9 +729,6 @@ public class MisraAndTypeAnalyzer
             return;
 
         if (t1.Value.Category == t2.Value.Category)
-            return;
-
-        if (IsNonNegativeConstant(op1) || IsNonNegativeConstant(op2))
             return;
 
         AddIssue(issues, emittedKeys, rulesById, "misra-c2012-10.4", tok.File, tok.LineNr, tok.Column,
@@ -708,16 +777,39 @@ public class MisraAndTypeAnalyzer
             DumpToken? currentCaseTok = null;
             bool caseHasStatements = false;
             bool caseTerminated = false;
+            bool pendingTermination = false;
+            var unconditionalBlocks = new Stack<bool>();
 
             for (var tok = startTok.Next; tok != null && tok != endTok; tok = tok.Next)
             {
+                // return 식이나 goto 레이블은 종료 문장의 일부이며 후속 문장이 아니다.
+                if (pendingTermination)
+                {
+                    if (tok.Str == ";")
+                    {
+                        pendingTermination = false;
+                        caseTerminated = true;
+                    }
+                    continue;
+                }
+
                 if (tok.Str == "{")
                 {
+                    // 조건문/반복문/중첩 switch의 break는 바깥 절의 무조건 종료가 아니다.
+                    bool unconditional = (unconditionalBlocks.Count == 0 || unconditionalBlocks.Peek()) &&
+                        tok.Previous?.Str is ":" or ";" or "{" or "}";
+                    unconditionalBlocks.Push(unconditional);
+                    if (currentCaseTok != null)
+                    {
+                        caseHasStatements = true;
+                        caseTerminated = false;
+                    }
                     braceDepth++;
                     continue;
                 }
                 if (tok.Str == "}")
                 {
+                    unconditionalBlocks.Pop();
                     braceDepth--;
                     continue;
                 }
@@ -748,9 +840,11 @@ public class MisraAndTypeAnalyzer
                     if (tok.Str == ";" && tok.Column == 0)
                         continue;
 
-                    if (tok.Str is "break" or "return" or "goto" && braceDepth == 0)
+                    if (tok.Str is "break" or "return" or "goto" &&
+                        (unconditionalBlocks.Count == 0 || unconditionalBlocks.Peek()))
                     {
-                        caseTerminated = true;
+                        caseHasStatements = true;
+                        pendingTermination = true;
                     }
                     else if (tok.Str != ";")
                     {
