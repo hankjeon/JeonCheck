@@ -42,6 +42,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CodeLineViewModel> CurrentFileLines { get; } = new();
     public ObservableCollection<AnalysisIssue> FilteredDefects { get; } = new();
+    public ObservableCollection<RuleIssueGroup> RuleIssueGroups { get; } = new();
     public ObservableCollection<AnalysisIssue> NotesAndInfos { get; } = new();
     public ObservableCollection<SuppressedIssueEntry> SuppressedIssues { get; } = new();
     public ObservableCollection<string> DefectCategoryFilters { get; } = new()
@@ -175,6 +176,8 @@ public class MainViewModel : INotifyPropertyChanged
 
     public string RulesetButtonText => $"⚙ 검사 규칙 설정 ({AllRules.Count(r => r.IsEnabled)}/{AllRules.Count})";
     public string DefectsTabHeader => $"🚨 결함 및 규칙 위반 ({FilteredDefects.Count})";
+    public string RuleSummaryTabHeader => $"📊 규칙별 요약 ({RuleIssueGroups.Count}개)";
+    public string RuleSummaryStatusText => $"{RuleIssueGroups.Count}개 규칙 · {FilteredDefects.Count}건 (현재 검색·분류·예외 처리 기준)";
     public string NotesTabHeader => $"ℹ️ 노트 / 누락 파일 안내 ({NotesAndInfos.Count})";
     public string SuppressedTabHeader => $"🔇 예외(무시) 항목 ({SuppressedIssues.Count})";
     public string TargetFilesSummary => "검사대상 코드";
@@ -273,6 +276,7 @@ public class MainViewModel : INotifyPropertyChanged
         _allRawDefects.Clear();
         _coverageByFile.Clear();
         FilteredDefects.Clear();
+        RuleIssueGroups.Clear();
         NotesAndInfos.Clear();
         SuppressedIssues.Clear();
         CurrentFileLines.Clear();
@@ -685,6 +689,15 @@ public class MainViewModel : INotifyPropertyChanged
             FilteredDefects.Add(d);
         }
 
+        var expandedRules = RuleIssueGroups.ToDictionary(g => g.RuleId, g => g.IsExpanded, StringComparer.OrdinalIgnoreCase);
+        RuleIssueGroups.Clear();
+        foreach (var group in RuleSummaryBuilder.Build(FilteredDefects))
+        {
+            if (expandedRules.TryGetValue(group.RuleId, out bool expanded))
+                group.IsExpanded = expanded;
+            RuleIssueGroups.Add(group);
+        }
+
         UpdateTreeDefectBadges();
         if (!string.IsNullOrEmpty(CurrentCodeFilePath) && File.Exists(CurrentCodeFilePath))
         {
@@ -1009,6 +1022,8 @@ public class MainViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(RulesetButtonText));
         OnPropertyChanged(nameof(DefectsTabHeader));
+        OnPropertyChanged(nameof(RuleSummaryTabHeader));
+        OnPropertyChanged(nameof(RuleSummaryStatusText));
         OnPropertyChanged(nameof(NotesTabHeader));
         OnPropertyChanged(nameof(SuppressedTabHeader));
         OnPropertyChanged(nameof(TargetFilesSummary));

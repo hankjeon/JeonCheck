@@ -21,6 +21,8 @@
             <TextBlock Text="⚙ 정적 분석 검사 규칙(Ruleset) 설정" FontSize="17" FontWeight="Bold" Foreground="#E6EDF3" />
             <TextBlock Text="프로젝트 특성에 맞게 검사할 규칙을 켜거나(ON) 의도적으로 허용하는 규칙을 제외(OFF)할 수 있습니다."
                        FontSize="12" Foreground="#9DA7B3" Margin="0,3,0,0" />
+            <TextBlock Text="심각도는 앱의 기본 분류입니다. MISRA 의무 등급과 그 외 규칙의 프로젝트 검토 정책을 구분해 표시합니다."
+                       FontSize="12" Foreground="#9DA7B3" Margin="0,3,0,0" />
         </StackPanel>
 
         <!-- 필터 및 일괄 선택 바 -->
@@ -38,7 +40,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                     <Button Content="목록 전체 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectAll_Click" ToolTip="현재 카테고리·검색어로 걸러져 목록에 보이는 규칙만 모두 켭니다" />
                     <Button Content="목록 전체 해제" Style="{StaticResource DarkButtonStyle}" Click="UnselectAll_Click" ToolTip="현재 카테고리·검색어로 걸러져 목록에 보이는 규칙만 모두 끕니다" />
-                    <Button Content="필수/치명만 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectRequiredOnly_Click" ToolTip="전체 규칙 중 필수·치명·강제 등급만 켜고 나머지는 끕니다 (목록 필터와 무관)" />
+                    <Button Content="필수/우선 검토 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectRequiredOnly_Click" ToolTip="MISRA 필수·강제 규칙 및 프로젝트의 필수·우선 검토 정책 규칙을 켭니다 (목록 필터와 무관)" />
                     <Button Content="형변환 집중 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectConversionOnly_Click" ToolTip="전체 규칙 중 형변환 관련 규칙만 켜고 나머지는 끕니다 (목록 필터와 무관)" />
                 </StackPanel>
             </DockPanel>
@@ -84,7 +86,8 @@
                 <DataGridCheckBoxColumn Header="검사 포함" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="75" />
                 <DataGridTextColumn Header="규칙 ID" Binding="{Binding Id}" IsReadOnly="True" Width="170" FontFamily="{StaticResource CodingFont}" />
                 <DataGridTextColumn Header="분류" Binding="{Binding Category}" IsReadOnly="True" Width="130" />
-                <DataGridTextColumn Header="의무 등급" Binding="{Binding Obligation}" IsReadOnly="True" Width="115" />
+                <DataGridTextColumn Header="기본 심각도" Binding="{Binding SeverityDisplay}" IsReadOnly="True" Width="80" />
+                <DataGridTextColumn Header="표준 의무 / 프로젝트 정책" Binding="{Binding ObligationDisplay}" IsReadOnly="True" Width="200" />
                 <DataGridTextColumn Header="규칙명" Binding="{Binding Title}" IsReadOnly="True" Width="240" />
                 <DataGridTextColumn Header="한 줄 요약 설명" Binding="{Binding Summary}" IsReadOnly="True" Width="*" />
             </DataGrid.Columns>

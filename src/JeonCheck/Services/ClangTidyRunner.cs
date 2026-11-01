@@ -360,13 +360,11 @@ public class ClangTidyRunner
                 {
                     Id = selectedId,
                     Category = "Clang-Tidy / CERT-C",
-                    Severity = selectedId.StartsWith("clang-analyzer-", StringComparison.OrdinalIgnoreCase) ? "Error" : "Warning",
-                    Obligation = selectedId.StartsWith("cert-", StringComparison.OrdinalIgnoreCase) ? "필수(Required)" : "권고(Advisory)",
+                    Severity = m.Groups["sev"].Value == "error" ? "Error" : "Warning",
+                    Obligation = "미분류",
                     Title = $"Clang-Tidy 검출 ({selectedId})",
-                    Summary = rawMsg,
-                    Description = $"Clang-Tidy / Clang Static Analyzer가 컴파일러 프론트엔드 분석을 통해 검출한 항목입니다.\n원문 진단: {rawMsg}",
-                    BadExample = "/* 검출된 코드 라인의 타입, 매크로 확장 또는 분기 경로를 확인하십시오. */",
-                    GoodExample = "/* 명시적 형변환 및 방어 조건을 추가하십시오. */",
+                    Summary = "개별 한글 해설이 아직 등록되지 않은 진단입니다. 원문과 해당 코드의 타입·값·실행 경로를 확인하십시오.",
+                    Description = $"이 Clang-Tidy 세부 규칙의 개별 한글 해설과 코드 예시는 아직 등록되지 않았습니다. 원문 진단에서 문제가 된 연산과 발생 조건을 확인한 뒤 원인에 맞게 수정하십시오.\n원문 진단: {rawMsg}",
                     IsEnabled = true
                 };
             }

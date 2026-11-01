@@ -17,6 +17,8 @@ public class AnalysisIssue
     public bool IsInfoOrNote { get; set; }
     public RuleInfo? RuleDetails { get; set; }
 
+    public string ObligationDisplay => RuleInfo.FormatObligation(RuleId, Obligation);
+
     public string SeverityDisplay => Severity switch
     {
         "Error" => "오류",
