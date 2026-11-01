@@ -41,6 +41,10 @@ def test_sample_analysis_detects_custom_misra_and_cppcheck(sample_copy):
     assert {"arrayIndexOutOfBounds", "uninitvar", "misra-c2012-9.1"} <= ids
     # 노트: 누락 헤더
     assert any(n.rule_id == "missingInclude" for n in s.notes)
+    # 샘플에서 misra.py가 보고하는 규칙은 모두 한글 해설 DB에 등록되어 있음
+    unregistered = sorted({d.rule_id for d in s.filtered_defects
+                           if d.rule_id.startswith("misra-") and d.rule_details.is_unregistered})
+    assert unregistered == []
 
     # #ifdef로 제외된 줄은 미검사로 표시
     s.load_file_into_code_viewer(str(sample_copy / "src" / "dsp_motor_ctrl.c"))
