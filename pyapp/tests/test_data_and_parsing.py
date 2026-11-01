@@ -126,3 +126,35 @@ def test_clang_tidy_narrowing_maps_to_implicit_narrowing_and_dedups():
     assert [i.rule_id for i in parse_clang_tidy_output(out, {normalize_path(TARGET)}, rules, keys)] == \
         ["implicitNarrowing"]
     assert parse_clang_tidy_output(out, {normalize_path(TARGET)}, rules, keys) == []
+
+
+def test_every_rule_reported_by_misra_py_has_korean_description():
+    """사용하는 addon의 misra.py가 보고할 수 있는 모든 규칙이 한글 해설 DB에 등록되어 있어야 한다."""
+    import re
+
+    import pytest
+
+    from jeoncheck import paths
+
+    addon = paths.cppcheck_addon_directory()
+    if addon is None:
+        pytest.skip("misra.py addon이 설치되어 있지 않음")
+    source = (addon / "misra.py").read_text(encoding="utf-8")
+    numbers = {tuple(m.split("_")[:2]) for m in re.findall(r"executeCheck\(\d+, self\.misra_([0-9_]+)", source)}
+    numbers |= set(re.findall(r"reportError\([^,()]+(?:\([^)]*\))?[^,()]*,\s*(\d+),\s*(\d+)\)", source))
+    assert len(numbers) > 100
+    ids = {r.id for r in repository.load_rules()}
+    missing = sorted(f"misra-c2012-{a}.{b}" for a, b in numbers if f"misra-c2012-{int(a)}.{int(b)}" not in ids)
+    assert missing == []
+
+
+def test_misra_rule_entries_are_consistent():
+    obligations = {"강제(Mandatory)": "Error", "필수(Required)": "Warning", "권고(Advisory)": "Style"}
+    for r in repository.load_rules():
+        if not r.id.startswith("misra-c2012-"):
+            continue
+        number = r.id.removeprefix("misra-c2012-")
+        assert r.category == "MISRA C 2012"
+        assert r.obligation in obligations, r.id
+        assert r.title.startswith(f"MISRA {number} - "), r.id
+        assert r.bad_example.strip() and r.good_example.strip(), r.id

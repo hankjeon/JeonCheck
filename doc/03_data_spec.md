@@ -69,7 +69,7 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
 
 ## 2. 한글 규칙 해설 데이터베이스 (`data/rules_ko.json`)
 
-현재 등록된 375개 진단 ID의 한글 설명과 기본 활성화 여부를 정의한다. 자체 타입 변환, MISRA 30개 ID(이 중 8.4·8.9·16.6·20.7은 Ubuntu 앱의 misra.py만 보고), Cppcheck 및 Clang-Tidy/CERT/Clang Analyzer ID를 포함한다. DB 등록은 엔진 구현이나 해당 버전의 체커 지원을 보장하지 않는다.
+현재 등록된 477개 진단 ID의 한글 설명과 기본 활성화 여부를 정의한다. 자체 타입 변환, MISRA 132개 ID(misra.py가 보고하는 131개와 Cppcheck 결과를 매핑하는 9.1. WPF 앱의 C# 분석기는 그중 25개와 9.1만 보고), Cppcheck 및 Clang-Tidy/CERT/Clang Analyzer ID를 포함한다. DB 등록은 엔진 구현이나 해당 버전의 체커 지원을 보장하지 않는다.
 
 ```json
 {
