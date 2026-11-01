@@ -21,7 +21,7 @@ Ubuntu에서는 같은 데이터(`data/`, `samples/`)를 사용하는 **PySide6 
 
 ## 한글 설명과 분석 제한
 
-`data/rules_ko.json`에는 375개 규칙의 제목·요약·상세 설명이 등록되어 있습니다. 코드 예시는 선택 항목이며, 양쪽 예시가 없는 296개 규칙은 미등록 안내를 표시합니다. 심각도와 MISRA 의무 등급, 그 외 규칙의 프로젝트 검토 정책을 구분해 표시합니다.
+`data/rules_ko.json`에는 477개 규칙의 제목·요약·상세 설명이 등록되어 있습니다. 코드 예시는 선택 항목이며, 양쪽 예시가 없는 296개 규칙은 미등록 안내를 표시합니다. 심각도와 MISRA 의무 등급, 그 외 규칙의 프로젝트 검토 정책을 구분해 표시합니다.
 
 누락 헤더는 노트로 안내합니다. Clang-Tidy는 일부 누락 헤더를 임시 빈 파일로 보완하지만 타입·매크로의 의미를 복원하지 못하며, 컴파일 오류나 결과 누락이 남을 수 있습니다. TI DSP의 Clang-Tidy 분석에는 ARM 대체 트리플을 사용하므로 실제 DSP ABI와 일치하지 않습니다. 특히 COFF의 40비트 `long` 모델은 Clang-Tidy에 동일하게 적용되지 않습니다.
 
@@ -66,7 +66,7 @@ cd pyapp
 
 Windows 앱과 결과가 같지 않을 수 있습니다.
 
-- **MISRA 범위:** Windows 앱은 C#으로 옮긴 25개 규칙만 보고하지만, Ubuntu 앱은 `misra.py`가 검출하는 모든 규칙을 보고합니다. `rules_ko.json`에 없는 규칙은 미등록 진단으로 표시하며 룰셋에서 끌 수 있습니다. MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, `misra.py`가 규칙 원문 없이 출력하므로 위치별 상세 원문은 없습니다.
+- **MISRA 범위:** Windows 앱은 C#으로 옮긴 25개 규칙만 보고하지만, Ubuntu 앱은 `misra.py`가 검출하는 모든 규칙을 보고합니다. `misra.py`가 보고하는 131개 규칙은 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, `misra.py`가 규칙 원문 없이 출력하므로 위치별 상세 원문은 없습니다.
 - **도구 버전:** apt의 Cppcheck(26.04 기준 2.19)와 Clang-Tidy(21)를 사용하므로 내장 Windows 도구(Cppcheck 2.22)와 진단이 다를 수 있습니다.
 - **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 C# 검사를 Python으로 옮긴 것이며, 필수 타입은 `misra.py`의 `getEssentialType()`으로 계산합니다.
 - **외부 도구:** 외부 편집기는 VS Code(`code`)가 있으면 해당 줄로 열고, 없으면 `xdg-open`으로 엽니다.
