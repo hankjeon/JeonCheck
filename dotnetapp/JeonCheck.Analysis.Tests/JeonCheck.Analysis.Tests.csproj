@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <!-- WPF 없이 Windows/Linux에서 실제 분석기 소스를 검증한다. -->
+  <ItemGroup>
+    <Compile Include="../JeonCheck/Models/DumpDataModels.cs" Link="Models/DumpDataModels.cs" />
+    <Compile Include="../JeonCheck/Models/AnalysisIssue.cs" Link="Models/AnalysisIssue.cs" />
+    <Compile Include="../JeonCheck/Models/RuleInfo.cs" Link="Models/RuleInfo.cs" />
+    <Compile Include="../JeonCheck/Models/SourceTreeNode.cs" Link="Models/SourceTreeNode.cs" />
+    <Compile Include="../JeonCheck/Models/TargetPreset.cs" Link="Models/TargetPreset.cs" />
+    <Compile Include="../JeonCheck/Models/RuleIssueGroup.cs" Link="Models/RuleIssueGroup.cs" />
+    <Compile Include="../JeonCheck/Models/ProjectFileModel.cs" Link="Models/ProjectFileModel.cs" />
+    <Compile Include="../JeonCheck/Models/CodeLineViewModel.cs" Link="Models/CodeLineViewModel.cs" />
+    <Compile Include="../JeonCheck/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
+    <Compile Include="../JeonCheck/Services/DumpFileParser.cs" Link="Services/DumpFileParser.cs" />
+    <Compile Include="../JeonCheck/Services/EssentialTypeResolver.cs" Link="Services/EssentialTypeResolver.cs" />
+    <Compile Include="../JeonCheck/Services/MisraAndTypeAnalyzer.cs" Link="Services/MisraAndTypeAnalyzer.cs" />
+    <Compile Include="../JeonCheck/Services/CppcheckRunner.cs" Link="Services/CppcheckRunner.cs" />
+    <Compile Include="../JeonCheck/Services/ClangTidyRunner.cs" Link="Services/ClangTidyRunner.cs" />
+    <Compile Include="../JeonCheck/Services/IncludePathResolver.cs" Link="Services/IncludePathResolver.cs" />
+    <Compile Include="../JeonCheck/Services/ProcessHelper.cs" Link="Services/ProcessHelper.cs" />
+    <Compile Include="../JeonCheck/Services/PathResolver.cs" Link="Services/PathResolver.cs" />
+    <Compile Include="../JeonCheck/Services/RuleSummaryBuilder.cs" Link="Services/RuleSummaryBuilder.cs" />
+    <Compile Include="../JeonCheck/Services/DataRepository.cs" Link="Services/DataRepository.cs" />
+    <Compile Include="../JeonCheck/Services/ExternalEditorLauncher.cs" Link="Services/ExternalEditorLauncher.cs" />
+    <None Include="../../data/rules_ko.json" Link="rules_ko.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

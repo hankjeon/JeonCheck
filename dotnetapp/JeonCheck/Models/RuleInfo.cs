@@ -45,6 +45,24 @@ public class RuleInfo : INotifyPropertyChanged
     public string GoodExample { get; set; } = string.Empty;
 
     [JsonIgnore]
+    public bool IsUnregistered { get; init; }
+
+    public static RuleInfo CreateUnregistered(string id, string severity = "Warning", string engine = "분석 도구") => new()
+    {
+        Id = id,
+        Category = engine == "Cppcheck" ? "Cppcheck 기본 검사" : engine == "Clang-Tidy" ? "Clang-Tidy / CERT-C" : "미등록 진단",
+        Severity = severity,
+        Obligation = "미분류",
+        Title = $"{engine} 검출 ({id})",
+        Summary = "개별 한글 해설이 아직 등록되지 않은 진단입니다. 원문과 해당 코드의 타입·값·실행 경로를 확인하십시오.",
+        // 발생 위치마다 다른 원문은 AnalysisIssue.Message에 보존한다.
+        Description = $"이 {engine} 세부 규칙의 개별 한글 해설과 코드 예시는 아직 등록되지 않았습니다. 선택한 항목의 검출 메시지에 표시된 원문에서 문제가 된 연산과 발생 조건을 확인한 뒤 원인에 맞게 수정하십시오.",
+        IsUnregistered = true,
+        DefaultEnabled = true,
+        IsEnabled = true
+    };
+
+    [JsonIgnore]
     public string SeverityDisplay => Severity switch
     {
         "Error" => "오류",

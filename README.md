@@ -1,55 +1,139 @@
 # 전검사 (JeonCheck)
 
-**전검사(JeonCheck)**는 고신뢰성이 요구되는 임베디드 C 소스 코드의 정적 분석을 쉽고 직관적으로 수행할 수 있도록 돕는 **Windows 데스크탑 애플리케이션(.NET 10 WPF)**입니다.
+전검사는 임베디드 C 소스를 검사하는 **Windows 데스크탑 애플리케이션(.NET 10 WPF)**입니다. 내장 Cppcheck, C# AST 분석기, 선택적으로 실행하는 Clang-Tidy의 결과를 한글 설명과 함께 표시합니다.
 
-복잡한 컴파일러 빌드 환경 없이도 타겟 프로세서 프리셋과 내장된 **Cppcheck**, **Clang-Tidy (LLVM)** 및 **C# 네이티브 AST/MISRA 분석 엔진**을 결합하여 결함 검출, 암묵적 축소 변환 검사, CERT-C/MISRA 규칙 검증, 코드 라인별 분석 범위 시각화를 제공합니다.
+Ubuntu에서는 같은 데이터(`data/`, `samples/`)를 사용하는 **PySide6 앱(`pyapp/`)**을 실행할 수 있습니다. 이 앱은 Windows에서도 저장소의 내장 도구(`tools/`)로 실행할 수 있습니다. 환경별 실행 방법과 WPF 앱과의 차이는 [실행 방법](#실행-방법)을 참고하십시오.
 
----
+크로스 컴파일러 없이 타겟 프리셋으로 분석을 시작할 수 있습니다. 실제 헤더·매크로·컴파일 옵션이 부족하면 결과가 제한될 수 있으며, MISRA 전체 규칙 지원이나 결함의 완전한 검출을 보장하지 않습니다.
 
 ## 주요 기능
 
-- **컴파일러 비종속 간편 타겟 프리셋**
-  - **TI DSP**: `TMS320C6746`, `C6655`, `C6672`, `C6678` (COFF 40-bit `long` / EABI 32-bit `long` 및 TI 전용 키워드 자동 처리)
-  - **NXP**: `QorIQ T1024` (PowerPC e5500, Big Endian)
-  - **Microchip**: `PolarFire SoC` (64-bit RISC-V, Little Endian)
-  - **AMD/Xilinx**: `Versal AP` (64-bit ARM Cortex-A72), `Versal RP` (32-bit ARM Cortex-R5F)
-- **유연한 소스 관리 및 분리 분석**
-  - 폴더 및 파일 단위 소스 코드 임포트
-  - 실제 정적 분석을 수행할 **검사 대상 코드**와 단순 참조/제외할 **비대상 코드** 분리 설정
-  - 누락된 포함 파일(`#include`) 등으로 인해 분석하지 못한 항목은 에러가 아닌 **Info / Note**로 분리 표시
-- **라인별 검사 상태 시각화 코드 뷰어**
-  - 🟢 **검사 완료 줄**: 전처리 및 구문 분석이 정상 수행된 코드 라인
-  - ⚪ **미검사(Skipped) 줄**: `#ifdef` 조건 불충족, 매크로 미정의 등으로 분석에서 제외된 라인
-  - 🔴 **결함 검출 줄**: 에러, 경고, 타입 변환 위험 및 MISRA 규칙 위반이 발생한 라인 하이라이트
-- **C# 네이티브 MISRA C 2012 & Clang-Tidy (CERT-C) 듀얼 엔진**
-  - Python 의존성 없이 Cppcheck `--dump` AST를 C#에서 직접 분석
-  - **Clang-Tidy 포터블 내장 (`tools/clang-tidy/`)**: 누락된 `#include` 헤더가 있어도 자동 임시 더미(Stub) 헤더를 생성하여 중단 없이 `bugprone-*`, `cert-*`(CERT-C), `clang-analyzer-*` 경로 추적 분석 수행
-  - **암묵적 축소 변환(`Implicit Narrowing Conversion`)** 및 부호 변환 정밀 검출
-  - **내장 한글 규칙 해설 DB (`rules_ko.json`)**: MISRA C 2012, CERT-C, Clang-Tidy 및 Cppcheck 에러에 대한 상세 한글 설명과 위반/개선 코드 예시 제공
-- **맞춤형 룰셋(Ruleset) 선택, 코드 줄 단위 예외/복원 및 프로젝트 관리**
-  - 규칙별 한글 요약 확인 및 개별 ON/OFF 선택 창 제공
-  - 코드 뷰어의 각 줄(Line)에서 바로 **`[🔇 이 줄 예외]`** 처리(보라색 음영 표시) 및 **`[↩ 다시 검사(복원)]`** 원클릭 토글 지원
-  - 임포트한 폴더/파일 목록, 대상/비대상 설정, 타겟 프리셋, 선택한 룰셋을 프로젝트 파일(`*.jcproj`)로 저장 및 불러오기
+- 폴더·파일을 검사 대상과 비대상/참조 트리로 나누고, 선택 항목을 이동·제거합니다. 폴더 스캔은 `.c`, `.h`, `.cpp`, `.hpp`를 포함하지만 주된 분석 대상은 C이며 Clang-Tidy에는 `-xc`를 전달합니다.
+- C89/C99/C11/C17, 사용자 매크로, Cppcheck `--force`, Clang-Tidy 사용 여부를 설정합니다.
+- TI DSP C6746/C6655/C6672/C6678 EABI, C6746/C6678 COFF, NXP T1024 32/64비트, PolarFire RV64, Versal AP/RP의 **11개 프리셋**을 제공합니다.
+- Cppcheck `.dump`를 C#에서 해석하여 축소·부호 변환과 MISRA 일부 규칙을 검사합니다. Python addon을 실행하지 않습니다. 직접 보고하는 MISRA 규칙은 25개이며, 9.1은 Cppcheck 결과에서 별도로 매핑합니다. 정확한 목록과 제한은 [아키텍처 문서](doc/02_architecture.md)를 참고하십시오.
+- 코드 줄에 오류·경고·분석 토큰 존재·미검사·예외 상태를 표시합니다. 같은 줄의 여러 진단은 `[규칙ID +N]` 배지와 전체 툴팁으로 확인합니다.
+- 결과는 **결함 목록 / 규칙별 요약 / 노트 / 예외 항목** 탭으로 나눕니다. 규칙별 요약은 발생 건수 순으로 규칙을 묶고, 펼치면 발생 위치와 현재 파일의 코드 한 줄을 표시합니다. 항목 선택 시 코드와 상세 설명으로 이동합니다.
+- 검색·분류 필터와 예외 처리 상태는 결함 목록과 규칙별 요약에 함께 반영됩니다.
+- 특정 규칙의 파일·줄 단위 예외, 줄 전체 예외, 복원, 규칙 전체 OFF를 지원합니다. 개별 예외 키에는 열 번호가 없으므로 같은 줄의 같은 규칙은 함께 예외 처리됩니다.
+- 타겟·옵션·트리 구성·룰셋·예외 목록을 `*.jcproj`로 저장합니다. 분석 결과와 요약 화면 상태는 저장하지 않습니다.
+- 샘플 로드, 분석 취소, VS Code/메모장 열기, 탐색기 열기, 프로그램 정보 창을 제공합니다.
 
----
+## 한글 설명과 분석 제한
 
-## 폴더 구조
+`data/rules_ko.json`에는 477개 규칙의 제목·요약·상세 설명이 등록되어 있습니다. 코드 예시는 선택 항목이며, 양쪽 예시가 없는 296개 규칙은 미등록 안내를 표시합니다. 심각도와 MISRA 의무 등급, 그 외 규칙의 프로젝트 검토 정책을 구분해 표시합니다.
 
-```text
-JeonCheck/
-├── AGENTS.md           # AI 에이전트 작업 지침 및 개발 원칙
-├── README.md           # 프로젝트 개요 문서
-├── doc/                # 요구사항, 아키텍처, 설계 및 데이터 명세 문서
-├── tools/              # 외부 도구 (Cppcheck 포터블 내장 폴더)
-├── data/               # 타겟 프리셋(.xml/.json) 및 한글 규칙 해설 DB(rules_ko.json)
-├── samples/            # 검증 및 테스트용 임베디드 C 샘플 코드
-└── src/                # .NET 10 WPF 솔루션(JeonCheck.sln) 및 애플리케이션 소스 코드
+누락 헤더는 노트로 안내합니다. Clang-Tidy는 일부 누락 헤더를 임시 빈 파일로 보완하지만 타입·매크로의 의미를 복원하지 못하며, 컴파일 오류나 결과 누락이 남을 수 있습니다. TI DSP의 Clang-Tidy 분석에는 ARM 대체 트리플을 사용하므로 실제 DSP ABI와 일치하지 않습니다. 특히 COFF의 40비트 `long` 모델은 Clang-Tidy에 동일하게 적용되지 않습니다.
+
+DB에 없는 ID도 원문과 개별 한글 해설 미등록 안내를 표시하며, 발견한 ID를 기본 ON으로 런타임 룰셋에 추가합니다. 결함 목록·규칙별 요약·상세에 연결되고 검색·분류·예외 상태를 적용합니다. 룰셋의 ON/OFF 선택은 프로젝트에 저장·복원하지만 실행 중 DB 파일을 자동 수정하거나 새 진단을 자동 번역하지는 않습니다.
+
+## 실행 방법
+
+전검사는 세 가지 환경에서 실행할 수 있습니다. 두 앱 모두 저장소의 `data/`·`samples/`(Windows는 `tools/`도)를 상위 경로에서 찾으므로 **저장소 구조를 유지한 채 실행**하십시오. 빌드된 실행 파일만 다른 폴더로 복사하는 배포 방식은 구성되어 있지 않습니다. Cppcheck가 분석 소스 옆에 `.dump` 파일을 만들었다가 지우므로 소스 폴더에 쓰기 권한이 필요합니다.
+
+| 구분 | Windows .NET (WPF) | Windows Python (PySide6) | Linux Python (PySide6) |
+| --- | --- | --- | --- |
+| 앱 위치 | `dotnetapp/` | `pyapp/` | `pyapp/` |
+| Cppcheck·Clang-Tidy | 내장 `tools/` (Cppcheck 2.22) | 내장 `tools/` (Cppcheck 2.22) | apt 패키지 (Ubuntu 26.04: Cppcheck 2.19, Clang-Tidy 21) |
+| MISRA 검사 | C# 분석기 25개 규칙 + 9.1 | `misra.py` 131개 규칙 + 9.1 | `misra.py` 131개 규칙 + 9.1 |
+| 확인 상태 | 기본 앱. Windows 수동 검증 절차는 [테스트 안내](dotnetapp/JeonCheck.Analysis.Tests/README.md) 참고 | **Windows 실행 미검증** (Linux에서 도구 선택·명령 구성만 자동 테스트) | Ubuntu 26.04에서 실행·테스트 확인 |
+
+### Windows .NET (WPF)
+
+**준비물:** Windows 10/11 x64, [.NET 10 SDK](https://dotnet.microsoft.com/download). GUI 실행에 필요한 .NET Desktop Runtime은 Windows용 SDK에 포함되어 있습니다. Cppcheck·Clang-Tidy는 `tools/`에 들어 있으므로 따로 설치하지 않습니다.
+
+저장소 루트에서 빌드하고 실행합니다.
+
+```bat
+dotnet restore dotnetapp/JeonCheck.sln
+dotnet build dotnetapp/JeonCheck.sln --no-restore -m:1
+dotnet run --project dotnetapp/JeonCheck/JeonCheck.csproj
 ```
 
----
+회귀 테스트는 외부 테스트 패키지가 없는 콘솔 실행기이므로 `dotnet test` 대신 아래 명령을 사용합니다. 실패하면 종료 코드 1을 반환합니다.
 
-## 개발 및 실행 환경
+```bat
+dotnet run --project dotnetapp/JeonCheck.Analysis.Tests
+```
 
-- **OS**: Windows 10 / 11 (x64)
-- **Framework**: .NET 10.0 (WPF)
-- **정적 분석 코어**: Cppcheck Portable (`tools/cppcheck/`) + Clang-Tidy Portable (`tools/clang-tidy/`) + JeonCheck Native AST Analyzer (C#)
+### Windows Python (PySide6)
+
+**준비물:** Windows 10/11 x64, Python 3.10 이상. [python.org](https://www.python.org/downloads/windows/) 설치 프로그램으로 설치하면 아래 명령에 쓰는 `py` 런처가 함께 설치됩니다. Cppcheck·Clang-Tidy는 `tools/`의 내장 도구를 사용하므로 따로 설치하지 않습니다.
+
+저장소 루트에서 가상 환경을 만들고 PySide6를 설치합니다(처음 한 번).
+
+```bat
+py -m venv pyapp\.venv
+pyapp\.venv\Scripts\pip install -r pyapp\requirements.txt
+```
+
+`pyapp` 폴더로 이동해 실행·테스트합니다. 앱을 실행하면 샘플 프로젝트가 자동으로 로드됩니다.
+
+```bat
+cd pyapp
+.venv\Scripts\python -m jeoncheck
+.venv\Scripts\python -m pytest -q
+```
+
+- **도구:** `tools/cppcheck/cppcheck.exe`·`tools/clang-tidy/clang-tidy.exe`를 사용하고, MISRA 검사는 같은 버전(2.22)의 `tools/cppcheck/addons/misra.py`를 실행합니다.
+- **외부 도구:** VS Code(`Code.exe`)가 있으면 해당 줄로 열고, 없으면 메모장으로 엽니다. 폴더 열기는 탐색기에서 파일을 선택한 상태로 엽니다.
+- **검증 범위:** Windows에서의 실제 실행·화면 동작은 아직 확인하지 않았습니다. 문제가 있으면 위 테스트 명령의 결과와 함께 알려 주십시오.
+
+### Linux Python (PySide6)
+
+**준비물:** Ubuntu(26.04에서 확인), Python 3와 venv, apt의 Cppcheck·Clang-Tidy. 저장소 `tools/`의 Windows 실행 파일은 사용하지 않으며, `tools/clang-tidy/include`의 간이 표준 헤더만 사용합니다.
+
+패키지를 설치하고 저장소 루트에서 가상 환경을 만듭니다(처음 한 번).
+
+```sh
+sudo apt install cppcheck clang-tidy python3-venv
+python3 -m venv pyapp/.venv
+pyapp/.venv/bin/pip install -r pyapp/requirements.txt
+```
+
+`pyapp` 폴더로 이동해 실행·테스트합니다. 통합 테스트는 Cppcheck가 없으면 건너뜁니다.
+
+```sh
+cd pyapp
+.venv/bin/python -m jeoncheck
+.venv/bin/python -m pytest -q
+```
+
+- **도구:** PATH의 `cppcheck`·`clang-tidy`를 사용하고, MISRA 검사는 apt 패키지에 포함된 같은 버전의 `misra.py`(Ubuntu 26.04: `/usr/lib/x86_64-linux-gnu/cppcheck/addons`)를 실행합니다.
+- **외부 도구:** VS Code(`code`)가 있으면 해당 줄로 열고, 없으면 `xdg-open`으로 기본 편집기를 엽니다. 폴더 열기도 `xdg-open`을 사용합니다.
+
+### Python 앱 공통 사항
+
+- **도구 경로 지정:** 도구는 환경변수 → (Windows) 저장소 내장 도구 → PATH 순으로 찾습니다. `JEONCHECK_CPPCHECK`, `JEONCHECK_CLANG_TIDY`, `JEONCHECK_ADDON_DIR`(`misra.py`가 있는 addon 폴더) 환경변수로 바꿀 수 있습니다. addon은 사용하는 Cppcheck와 같은 버전이어야 합니다.
+- **프로젝트 파일:** `*.jcproj`는 WPF 앱과 같은 형식이며 서로 열 수 있습니다.
+- **MISRA 범위:** WPF 앱은 C#으로 옮긴 25개 규칙만 보고하지만, Python 앱은 `misra.py`가 검출하는 모든 규칙을 보고하므로 진단이 더 많을 수 있습니다. 131개 규칙 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. `misra.py`가 규칙 원문 없이 출력하므로 MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, 위치별 상세 원문은 없습니다.
+- **도구 버전:** Linux는 apt 도구(Ubuntu 26.04: Cppcheck 2.19)를 사용하므로 Windows 내장 도구(Cppcheck 2.22)와 진단이 다를 수 있습니다.
+- **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 C# 검사를 Python으로 옮긴 것이며, 필수 타입은 `misra.py`의 `getEssentialType()`으로 계산합니다.
+
+### Linux에서 .NET 교차 빌드 (개발용)
+
+Linux에서도 Windows 대상 **교차 빌드와 C# 회귀 테스트**는 실행할 수 있습니다. 이는 WPF GUI나 Windows 내장 도구의 실행 검증이 아닙니다. .NET 10 SDK가 필요합니다(Ubuntu: `sudo apt install dotnet-sdk-10.0`).
+
+```sh
+dotnet restore dotnetapp/JeonCheck.sln -p:EnableWindowsTargeting=true
+dotnet build dotnetapp/JeonCheck.sln --no-restore -p:EnableWindowsTargeting=true -m:1
+dotnet run --project dotnetapp/JeonCheck.Analysis.Tests
+```
+
+SDK를 `/workspace/.local/dotnet` 같은 사용자 폴더에 설치한 경우 셸에서 `DOTNET_ROOT`와 `PATH`를 설정해야 합니다.
+
+## 폴더 및 문서
+
+| 경로 | 내용 |
+| --- | --- |
+| `dotnetapp/` | WPF 앱과 솔루션 |
+| `pyapp/` | PySide6 앱(Ubuntu 기본, Windows 실행 가능)과 pytest 테스트 |
+| `data/` | 타겟 프리셋·플랫폼 XML·한글 규칙 DB |
+| `tools/` | Windows용 Cppcheck·Clang-Tidy와 분석 보조 파일. Windows에서는 WPF·Python 앱이 함께 사용하고, Linux에서는 `clang-tidy/include` 간이 헤더만 사용 |
+| `samples/` | 의도적인 위반을 포함한 C 샘플과 프로젝트 |
+| `dotnetapp/JeonCheck.Analysis.Tests/` | 분석기·설명 처리·규칙별 요약 회귀 테스트 |
+| [AGENTS.md](AGENTS.md) | 에이전트 행동 원칙과 구현 범위 |
+| [요구사항](doc/01_requirements.md) | 기능과 남은 구현 차이 |
+| [아키텍처](doc/02_architecture.md) | 분석·표시 파이프라인 |
+| [데이터 명세](doc/03_data_spec.md) | 타겟·규칙·프로젝트 데이터 |
+| [UI 설계](doc/04_ui_design.md) | 화면 조작과 결과 표시 |

@@ -5,7 +5,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JeonCheck", "JeonCheck\JeonCheck.csproj", "{6FEA9285-F052-4893-BA47-269E390B6552}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JeonCheck.Analysis.Tests", "..\tests\JeonCheck.Analysis.Tests\JeonCheck.Analysis.Tests.csproj", "{E2BA3719-C28E-45FA-A2F3-EF52DEFC4DFA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JeonCheck.Analysis.Tests", "JeonCheck.Analysis.Tests\JeonCheck.Analysis.Tests.csproj", "{E2BA3719-C28E-45FA-A2F3-EF52DEFC4DFA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
