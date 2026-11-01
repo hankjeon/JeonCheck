@@ -28,6 +28,18 @@ public class AnalysisIssue
         _ => Severity
     };
 
+    public string ReviewSeverity => Severity.Equals("Error", StringComparison.OrdinalIgnoreCase) ? "Error" :
+        Severity.Equals("Warning", StringComparison.OrdinalIgnoreCase) &&
+        !Obligation.Contains("권고", StringComparison.OrdinalIgnoreCase) &&
+        !Obligation.Contains("Advisory", StringComparison.OrdinalIgnoreCase) ? "Warning" : "Advisory";
+    public string ReviewSeverityDisplay => ReviewSeverity switch
+    {
+        "Error" => "오류",
+        "Warning" => "경고",
+        _ => "권고"
+    };
+    public int ReviewSeverityRank => ReviewSeverity switch { "Error" => 0, "Warning" => 1, _ => 2 };
+
     public string SuppressionKey => $"{RuleId}|{ NormalizePath(FilePath) }|{Line}";
 
     /// <summary>

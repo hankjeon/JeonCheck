@@ -544,6 +544,22 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RuleSummaryCollapseAll_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var group in ViewModel.RuleIssueGroups)
+            group.IsExpanded = false;
+    }
+
+    private void RuleSummaryExpandAll_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var group in ViewModel.RuleIssueGroups)
+            group.IsExpanded = true;
+    }
+
+    private void ShowOnlyErrors_Click(object sender, RoutedEventArgs e) => ViewModel.ShowOnlyErrors();
+
+    private void ShowAllSeverities_Click(object sender, RoutedEventArgs e) => ViewModel.ShowAllSeverities();
+
     private void CodeViewerListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // 결함 목록에서 같은 줄의 다른 결함을 선택해 이동한 경우에는 그 선택을 유지하고,

@@ -178,6 +178,19 @@ class AnalysisIssue:
         return severity_display(self.severity)
 
     @property
+    def review_severity(self) -> str:
+        if self.severity.lower() == "error":
+            return "Error"
+        if self.severity.lower() == "warning" and "권고" not in self.obligation.lower() \
+                and "advisory" not in self.obligation.lower():
+            return "Warning"
+        return "Advisory"
+
+    @property
+    def review_severity_display(self) -> str:
+        return {"Error": "오류", "Warning": "경고", "Advisory": "권고"}[self.review_severity]
+
+    @property
     def obligation_display(self) -> str:
         return format_obligation(self.rule_id, self.obligation)
 
@@ -292,7 +305,7 @@ class RuleIssueGroup:
     rule_id: str = ""
     title: str = ""
     occurrences: list[RuleIssueOccurrence] = field(default_factory=list)
-    is_expanded: bool = True
+    is_expanded: bool = False
 
     @property
     def count(self) -> int:
@@ -309,6 +322,7 @@ class CodeLineStatus(Enum):
     SKIPPED = "skipped"        # 원본 코드 토큰은 있으나 분석 토큰이 없는 줄
     WARNING = "warning"        # 경고·규칙 위반 줄
     ERROR = "error"            # Error 진단이 있는 줄
+    ADVISORY = "advisory"      # 권고(Style/Advisory) 규칙 위반 줄
     SUPPRESSED = "suppressed"  # 활성 진단 없이 예외 항목만 있는 줄
 
 
@@ -324,7 +338,7 @@ class CodeLine:
 
     @property
     def can_suppress_line(self) -> bool:
-        return self.status in (CodeLineStatus.ERROR, CodeLineStatus.WARNING) and bool(self.issues)
+        return self.status in (CodeLineStatus.ERROR, CodeLineStatus.WARNING, CodeLineStatus.ADVISORY) and bool(self.issues)
 
     @property
     def can_restore_line(self) -> bool:

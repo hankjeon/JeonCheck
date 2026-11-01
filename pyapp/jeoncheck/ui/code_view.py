@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
-from PySide6.QtWidgets import QListView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import QListView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QToolTip, QWidget
 
 from ..models import CodeLine, CodeLineStatus
 from . import theme
@@ -167,3 +167,88 @@ class CodeView(QListView):
             menu.addAction("↩ 다시 검사(복원)", lambda: self.restoreRequested.emit(line))
         if not menu.isEmpty():
             menu.exec(self.viewport().mapToGlobal(pos))
+
+
+class DefectOverview(QWidget):
+    """전체 파일의 결함 위치를 스크롤바 옆에 표시하고 클릭·드래그 이동을 요청한다."""
+
+    lineRequested = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lines: list[CodeLine] = []
+        self.setFixedWidth(14)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_lines(self, lines: list[CodeLine]) -> None:
+        self.lines = list(lines)
+        self.update()
+
+    def _markers(self) -> list[tuple[CodeLine, float]]:
+        if not self.lines or self.height() <= 4:
+            return []
+        priority = {CodeLineStatus.ADVISORY: 0, CodeLineStatus.WARNING: 1, CodeLineStatus.ERROR: 2}
+        total = len(self.lines)
+        defects = sorted((line for line in self.lines if line.status in priority),
+                         key=lambda line: (priority[line.status], line.line_number))
+        return [(line, (line.line_number - 1) / (total - 1) * (self.height() - 4) if total > 1 else 0.0)
+                for line in defects]
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#18181A"))
+        painter.fillRect(QRect(0, 0, 1, self.height()), QColor("#2D2D30"))
+        for line, y in self._markers():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(theme.STATUS_COLORS[line.status][0]))
+            painter.drawRoundedRect(QRectF(1, y, max(6, self.width() - 2), 3.5), 1, 1)
+
+    def _marker_at(self, y: float) -> CodeLine | None:
+        # 마지막에 그린 마커가 위에 보이므로 같은 위치에서는 그 마커의 툴팁을 표시한다.
+        for line, top in reversed(self._markers()):
+            if top <= y <= top + 3.5:
+                return line
+        return None
+
+    def _line_at(self, y: float) -> CodeLine | None:
+        if not self.lines or self.height() <= 0:
+            return None
+        marker = self._marker_at(y)
+        if marker is not None:
+            return marker
+        nearest = min(self._markers(), key=lambda item: abs(y - item[1] - 1.75), default=None)
+        if nearest is not None and abs(y - nearest[1] - 1.75) <= 6:
+            return nearest[0]
+        ratio = max(0.0, min(y / self.height(), 1.0))
+        index = round(ratio * (len(self.lines) - 1))
+        return self.lines[index]
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            line = self._marker_at(event.pos().y())
+            if line is not None:
+                QToolTip.showText(event.globalPos(),
+                                  f"[{line.line_number}번째 줄] {line.inline_annotation}\n{line.tooltip_text}", self)
+            else:
+                QToolTip.showText(event.globalPos(),
+                                  "전체 코드 결함 위치 (오류 / 경고 / 권고) · 클릭하면 해당 줄로 이동합니다.", self)
+            return True
+        return super().event(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            line = self._line_at(event.position().y())
+            if line is not None:
+                self.lineRequested.emit(line)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            line = self._line_at(event.position().y())
+            if line is not None:
+                self.lineRequested.emit(line)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)

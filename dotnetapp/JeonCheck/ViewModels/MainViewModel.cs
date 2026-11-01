@@ -27,6 +27,9 @@ public class MainViewModel : INotifyPropertyChanged
     private AnalysisIssue? _selectedIssue;
     private string _defectSearchText = string.Empty;
     private string _selectedDefectCategoryFilter = "전체";
+    private bool _showErrors = true;
+    private bool _showWarnings = true;
+    private bool _showAdvisories = true;
 
     private List<AnalysisIssue> _allRawDefects = new();
     private Dictionary<string, FileLineCoverage> _coverageByFile = new();
@@ -206,10 +209,49 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool ShowErrors
+    {
+        get => _showErrors;
+        set => SetSeverityVisibility(value, _showWarnings, _showAdvisories);
+    }
+    public bool ShowWarnings
+    {
+        get => _showWarnings;
+        set => SetSeverityVisibility(_showErrors, value, _showAdvisories);
+    }
+    public bool ShowAdvisories
+    {
+        get => _showAdvisories;
+        set => SetSeverityVisibility(_showErrors, _showWarnings, value);
+    }
+
+    public void ShowOnlyErrors() => SetSeverityVisibility(true, false, false);
+    public void ShowAllSeverities() => SetSeverityVisibility(true, true, true);
+
+    private void SetSeverityVisibility(bool errors, bool warnings, bool advisories)
+    {
+        if (_showErrors == errors && _showWarnings == warnings && _showAdvisories == advisories)
+            return;
+        _showErrors = errors;
+        _showWarnings = warnings;
+        _showAdvisories = advisories;
+        OnPropertyChanged(nameof(ShowErrors));
+        OnPropertyChanged(nameof(ShowWarnings));
+        OnPropertyChanged(nameof(ShowAdvisories));
+        RefreshFilteredDefects();
+    }
+
+    private bool IsSeverityVisible(AnalysisIssue issue) => issue.ReviewSeverity switch
+    {
+        "Error" => _showErrors,
+        "Warning" => _showWarnings,
+        _ => _showAdvisories
+    };
+
     public string RulesetButtonText => $"⚙ 검사 규칙 설정 ({AllRules.Count(r => r.IsEnabled)}/{AllRules.Count})";
     public string DefectsTabHeader => $"🚨 결함 및 규칙 위반 ({FilteredDefects.Count})";
     public string RuleSummaryTabHeader => $"📊 규칙별 요약 ({RuleIssueGroups.Count}개)";
-    public string RuleSummaryStatusText => $"{RuleIssueGroups.Count}개 규칙 · {FilteredDefects.Count}건 (현재 검색·분류·예외 처리 기준)";
+    public string RuleSummaryStatusText => $"{RuleIssueGroups.Count}개 규칙 · {FilteredDefects.Count}건 (현재 검색·분류·심각도·예외 처리 기준)";
     public string NotesTabHeader => $"ℹ️ 노트 / 누락 파일 안내 ({NotesAndInfos.Count})";
     public string SuppressedTabHeader => $"🔇 예외(무시) 항목 ({SuppressedIssues.Count})";
     public string TargetFilesSummary => "검사대상 코드";
@@ -555,7 +597,7 @@ public class MainViewModel : INotifyPropertyChanged
 
             SelectedIssue = FilteredDefects.FirstOrDefault();
 
-            StatusMessage = $"분석 완료: 결함 {FilteredDefects.Count}건 검출 (참고 노트 {NotesAndInfos.Count}건, 예외 무시 {SuppressedIssues.Count}건)";
+            StatusMessage = $"분석 완료: 현재 표시 결함 {FilteredDefects.Count}건 (참고 노트 {NotesAndInfos.Count}건, 예외 무시 {SuppressedIssues.Count}건)";
         }
         catch (OperationCanceledException)
         {
@@ -647,11 +689,8 @@ public class MainViewModel : INotifyPropertyChanged
                 defectLineCount++;
                 analyzedCount++;
                 lineVm.Issues = lineIssues;
-                bool hasError = lineIssues.Any(x => x.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase));
-                bool hasWarning = lineIssues.Any(x =>
-                    x.Severity.Equals("Warning", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Obligation.Contains("권고", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Obligation.Contains("Advisory", StringComparison.OrdinalIgnoreCase));
+                bool hasError = lineIssues.Any(x => x.ReviewSeverity == "Error");
+                bool hasWarning = lineIssues.Any(x => x.ReviewSeverity == "Warning");
                 lineVm.Status = hasError
                     ? CodeLineStatus.Error
                     : (hasWarning ? CodeLineStatus.Warning : CodeLineStatus.Advisory);
@@ -659,7 +698,7 @@ public class MainViewModel : INotifyPropertyChanged
                 var primary = lineIssues[0];
                 string extra = lineIssues.Count > 1 ? $" +{lineIssues.Count - 1}" : string.Empty;
                 lineVm.InlineAnnotation = $"[{primary.RuleId}{extra}]";
-                lineVm.TooltipText = string.Join("\n\n", lineIssues.Select(x => $"[{x.RuleId} - {x.SeverityDisplay}]\n{x.Message}"));
+                lineVm.TooltipText = string.Join("\n\n", lineIssues.Select(x => $"[{x.RuleId} - {x.ReviewSeverityDisplay}]\n{x.Message}"));
             }
             else if (suppressedByLine.TryGetValue(lineNum, out var supEntries) && supEntries.Count > 0)
             {
@@ -741,6 +780,9 @@ public class MainViewModel : INotifyPropertyChanged
             if (suppressedKeys.Contains(d.SuppressionKey))
                 continue;
 
+            if (!IsSeverityVisible(d))
+                continue;
+
             if (!string.IsNullOrEmpty(SelectedDefectCategoryFilter) && SelectedDefectCategoryFilter != "전체")
             {
                 if (!string.Equals(d.Category, SelectedDefectCategoryFilter, StringComparison.OrdinalIgnoreCase))
@@ -760,6 +802,9 @@ public class MainViewModel : INotifyPropertyChanged
 
             FilteredDefects.Add(d);
         }
+
+        if (SelectedIssue != null && !IsSeverityVisible(SelectedIssue))
+            SelectedIssue = null;
 
         var expandedRules = RuleIssueGroups.ToDictionary(g => g.RuleId, g => g.IsExpanded, StringComparer.OrdinalIgnoreCase);
         RuleIssueGroups.Clear();

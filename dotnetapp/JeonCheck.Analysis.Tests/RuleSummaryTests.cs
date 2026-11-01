@@ -72,6 +72,37 @@ static class RuleSummaryTests
                 Require(vm.RuleIssueGroups.Count == 0 && vm.RuleSummaryStatusText.Contains("0건"), "빈 검색 결과 미반영");
             });
 
+            test("심각도 표시 필터와 코드 줄 상태", () =>
+            {
+                var error = Issue("error", line: 1); error.Severity = "Error";
+                var advisory = Issue("advisory", line: 2); advisory.Obligation = "권고(Advisory)";
+                var sameLineAdvisory = Issue("sameLineAdvisory", line: 1); sameLineAdvisory.Severity = "Style";
+                var warning = Issue("warning", line: 3);
+                var vm = ViewModel(error, advisory, sameLineAdvisory, warning);
+                vm.AddTargetPath(file);
+                vm.RefreshFilteredDefects();
+                vm.LoadFileIntoCodeViewer(file);
+                Require(advisory.ReviewSeverityDisplay == "권고" && warning.ReviewSeverityDisplay == "경고", "권고/경고 표시 기준 불일치");
+                Require(vm.FilteredDefects.Count == 4 && vm.RuleIssueGroups.Count == 4, "기본 표시 범위 오류");
+                Require(vm.TargetRoots.Single().DefectCount == 4, "기본 파일 트리 건수 오류");
+
+                vm.SelectedIssue = advisory;
+                vm.ShowOnlyErrors();
+                Require(vm.ShowErrors && !vm.ShowWarnings && !vm.ShowAdvisories, "오류만 버튼 상태 오류");
+                Require(vm.FilteredDefects.SequenceEqual(new[] { error }) && vm.RuleIssueGroups.Single().RuleId == "error", "오류만 필터 오류");
+                Require(vm.SelectedIssue == null, "숨긴 결함이 상세 선택에 남음");
+                Require(vm.CurrentFileLines[0].Status == CodeLineStatus.Error && vm.CurrentFileLines[1].Status == CodeLineStatus.Neutral, "코드 줄 표시 필터 오류");
+                Require(vm.CurrentFileLines[0].Issues.SequenceEqual(new[] { error }), "같은 줄의 숨긴 권고가 코드에 남음");
+                Require(vm.TargetRoots.Single().DefectCount == 1, "파일 트리 건수 필터 오류");
+
+                vm.ShowWarnings = true;
+                Require(vm.FilteredDefects.SequenceEqual(new[] { error, warning }), "경고 개별 토글 오류");
+                vm.ShowAllSeverities();
+                Require(vm.FilteredDefects.Count == 4 && vm.CurrentFileLines[1].Status == CodeLineStatus.Advisory, "모두 표시 복원 오류");
+                vm.ShowErrors = false; vm.ShowWarnings = false; vm.ShowAdvisories = false;
+                Require(vm.FilteredDefects.Count == 0 && vm.RuleIssueGroups.Count == 0, "전체 숨김 오류");
+            });
+
             test("예외 처리·복원 시 요약 건수와 항목 갱신", () =>
             {
                 var first = Issue("a", column: 2);
@@ -91,11 +122,14 @@ static class RuleSummaryTests
                 Require(vm.RuleIssueGroups.Count == 1 && vm.RuleIssueGroups[0].RuleId == "b", "OFF 규칙이 요약에 남음");
             });
 
-            test("검색 갱신 시 그룹 접기 상태 유지", () =>
+            test("규칙별 요약 기본 접힘과 검색 갱신 시 펼침 상태 유지", () =>
             {
-                var vm = ViewModel(Issue("a"), Issue("b")); vm.RuleIssueGroups[0].IsExpanded = false;
+                var vm = ViewModel(Issue("a"), Issue("b"));
+                Require(vm.RuleIssueGroups.All(g => !g.IsExpanded), "새 그룹이 기본으로 펼쳐짐");
+                vm.RuleIssueGroups[0].IsExpanded = true;
                 string rule = vm.RuleIssueGroups[0].RuleId; vm.RefreshFilteredDefects();
-                Require(!vm.RuleIssueGroups.Single(g => g.RuleId == rule).IsExpanded, "접기 상태 초기화");
+                Require(vm.RuleIssueGroups.Single(g => g.RuleId == rule).IsExpanded, "펼침 상태 초기화");
+                Require(!vm.RuleIssueGroups.Single(g => g.RuleId != rule).IsExpanded, "다른 그룹의 접힘 상태 변경");
             });
 
             test("같은 줄의 두 번째 진단을 선택해도 상세 대상 보존", () =>

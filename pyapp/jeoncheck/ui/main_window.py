@@ -18,7 +18,7 @@ from ..models import AnalysisIssue, SourceTreeNode, SuppressedIssueEntry
 from ..paths import RESOURCES_DIR
 from ..state import C_STANDARDS, AnalysisRequest, AppState
 from . import theme
-from .code_view import CodeView
+from .code_view import CodeView, DefectOverview
 from .dialogs import AboutDialog, RulesetDialog
 from .missing_header_dialog import MissingHeaderDialog
 
@@ -78,13 +78,12 @@ class DefectsModel(QAbstractTableModel):
         if role == OBJ_ROLE:
             return d
         if role in (Qt.ItemDataRole.DisplayRole, SORT_ROLE):
-            values = [d.severity_display, d.category, d.rule_id, d.file_name, d.line, d.message]
+            values = [d.review_severity_display, d.category, d.rule_id, d.file_name, d.line, d.message]
             if role == SORT_ROLE and col == 0:
-                return ["Error", "Warning", "Style", "Info"].index(d.severity) if d.severity in \
-                    ("Error", "Warning", "Style", "Info") else 9
+                return {"Error": 0, "Warning": 1, "Advisory": 2}[d.review_severity]
             return values[col]
         if role == Qt.ItemDataRole.ForegroundRole and col == 0:
-            return QColor(theme.SEVERITY_COLORS.get(d.severity, theme.TEXT_PRIMARY))
+            return QColor(theme.SEVERITY_COLORS[d.review_severity])
         if role == Qt.ItemDataRole.ToolTipRole and col == 5:
             return d.message
         if role == Qt.ItemDataRole.FontRole and col == 2:
@@ -290,6 +289,27 @@ class MainWindow(QMainWindow):
         row.addWidget(search, 1)
         return row, combo, search
 
+    def _severity_filter_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(QLabel("표시:"))
+        buttons = {}
+        for severity, label, color in (("Error", "🔴 오류", "#F85149"),
+                                       ("Warning", "🟠 경고", "#D29922"),
+                                       ("Advisory", "🔵 권고", "#58A6FF")):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setStyleSheet(f"QPushButton {{ color: {theme.TEXT_SECONDARY}; background: {theme.BG_TOOLBAR}; "
+                                 f"border: 1px solid {theme.BORDER}; padding: 3px 8px; }} "
+                                 f"QPushButton:checked {{ color: {color}; background: #30363D; border-color: {color}; }}")
+            button.toggled.connect(lambda checked, level=severity: self.state.set_severity_visible(level, checked))
+            row.addWidget(button)
+            buttons[severity] = button
+        self.severity_buttons.append(buttons)
+        row.addStretch(1)
+        row.addWidget(self._button("오류만", self.state.show_only_errors))
+        row.addWidget(self._button("모두 표시", self.state.show_all_severities))
+        return row
+
     def _build_center_panel(self) -> QWidget:
         split = QSplitter(Qt.Orientation.Vertical)
 
@@ -310,15 +330,24 @@ class MainWindow(QMainWindow):
         self.code_view.lineSelected.connect(self._code_line_selected)
         self.code_view.suppressRequested.connect(lambda line: self._keep_line(self.state.suppress_code_line, line))
         self.code_view.restoreRequested.connect(lambda line: self._keep_line(self.state.restore_code_line, line))
-        cl.addWidget(self.code_view, 1)
+        code_row = QHBoxLayout()
+        code_row.setContentsMargins(0, 0, 0, 0)
+        code_row.setSpacing(0)
+        code_row.addWidget(self.code_view, 1)
+        self.defect_overview = DefectOverview()
+        self.defect_overview.lineRequested.connect(self._overview_line_requested)
+        code_row.addWidget(self.defect_overview)
+        cl.addLayout(code_row, 1)
         split.addWidget(code)
 
         self.tabs = QTabWidget()
+        self.severity_buttons = []
         # 1. 결함 목록
         defects = QWidget()
         dl = QVBoxLayout(defects)
         row, self.defects_category, self.defects_search = self._filter_row()
         dl.addLayout(row)
+        dl.addLayout(self._severity_filter_row())
         self.defects_model = DefectsModel()
         proxy = QSortFilterProxyModel(self)
         proxy.setSourceModel(self.defects_model)
@@ -347,6 +376,7 @@ class MainWindow(QMainWindow):
         sl = QVBoxLayout(summary)
         row, self.summary_category, self.summary_search = self._filter_row()
         sl.addLayout(row)
+        sl.addLayout(self._severity_filter_row())
         self.summary_status = QLabel()
         self.summary_status.setObjectName("secondary")
         sl.addWidget(self.summary_status)
@@ -358,8 +388,10 @@ class MainWindow(QMainWindow):
         self.summary_tree.currentItemChanged.connect(self._summary_selected)
         self.summary_tree.itemExpanded.connect(lambda it: self._group_expanded(it, True))
         self.summary_tree.itemCollapsed.connect(lambda it: self._group_expanded(it, False))
+        self.summary_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.summary_tree.customContextMenuRequested.connect(self._summary_menu)
         sl.addWidget(self.summary_tree, 1)
-        self.summary_empty = QLabel("표시할 진단이 없습니다. 분석을 실행하거나 검색·분류·예외 조건을 확인하십시오.")
+        self.summary_empty = QLabel("표시할 진단이 없습니다. 분석을 실행하거나 검색·분류·심각도·예외 조건을 확인하십시오.")
         self.summary_empty.setObjectName("secondary")
         self.summary_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sl.addWidget(self.summary_empty)
@@ -503,7 +535,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(3, s.suppressed_tab_header)
         self.summary_status.setText(s.rule_summary_status_text)
 
-        # 검색·분류 필터는 두 탭이 공유
+        # 검색·분류·심각도 필터는 두 탭이 공유
         for combo, edit in ((self.defects_category, self.defects_search), (self.summary_category, self.summary_search)):
             combo.blockSignals(True)
             combo.setCurrentText(s.category_filter)
@@ -512,6 +544,11 @@ class MainWindow(QMainWindow):
                 edit.blockSignals(True)
                 edit.setText(s.search_text)
                 edit.blockSignals(False)
+        for buttons in self.severity_buttons:
+            for severity, button in buttons.items():
+                button.blockSignals(True)
+                button.setChecked(severity in s.visible_severities)
+                button.blockSignals(False)
 
         self.summary_tree.blockSignals(True)
         self.summary_tree.clear()
@@ -560,6 +597,7 @@ class MainWindow(QMainWindow):
         self.file_label.setText(self.state.current_code_file_name)
         self.stats_label.setText(self.state.code_stats_summary)
         self.code_view.set_lines(self.state.current_file_lines)
+        self.defect_overview.set_lines(self.state.current_file_lines)
 
     def _sync_detail(self) -> None:
         issue = self.state.selected_issue
@@ -759,6 +797,18 @@ class MainWindow(QMainWindow):
         if hasattr(group, "is_expanded"):
             group.is_expanded = expanded
 
+    def _summary_menu(self, pos) -> None:
+        menu = QMenu(self)
+        menu.addAction("모두 접기", lambda: self._set_all_summary_groups_expanded(False))
+        menu.addAction("모두 펼치기", lambda: self._set_all_summary_groups_expanded(True))
+        menu.exec(self.summary_tree.viewport().mapToGlobal(pos))
+
+    def _set_all_summary_groups_expanded(self, expanded: bool) -> None:
+        for i in range(self.summary_tree.topLevelItemCount()):
+            item = self.summary_tree.topLevelItem(i)
+            item.data(0, OBJ_ROLE).is_expanded = expanded
+            item.setExpanded(expanded)
+
     def _note_selected(self, row, _col, _prev_row, _prev_col) -> None:
         item = self.notes_table.item(row, 0) if row >= 0 else None
         note = item.data(OBJ_ROLE) if item else None
@@ -823,6 +873,11 @@ class MainWindow(QMainWindow):
         # 코드 뷰어에서 직접 줄을 선택한 경우에만 그 줄의 첫 번째 결함을 선택 (같은 줄의 다른 결함 선택은 유지)
         selected = self.state.selected_issue
         if line.issues and (selected is None or selected not in line.issues):
+            self.state.select_issue(line.issues[0])
+
+    def _overview_line_requested(self, line) -> None:
+        self.code_view.go_to_line(line.line_number)
+        if line.issues:
             self.state.select_issue(line.issues[0])
 
     def _keep_line(self, action, line) -> None:

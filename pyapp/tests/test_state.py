@@ -90,6 +90,62 @@ def test_code_viewer_line_states_and_badge(state, src):
     assert state.current_file_lines[1].status == CodeLineStatus.WARNING
 
 
+def test_code_viewer_advisory_priority_and_suppression(state, src):
+    a = src / "a.c"
+    advisory = issue("advisory", a, 1, severity="Warning")
+    advisory.obligation = "권고(Advisory)"
+    style = issue("style", a, 2, severity="Style")
+    required = issue("required", a, 2, severity="Warning")
+    error = issue("error", a, 3, severity="Error")
+    advisory_with_error = issue("advisory-with-error", a, 3, severity="Style")
+    style_only = issue("style-only", a, 4, severity="Style")
+    set_results(state, advisory, style, required, error, advisory_with_error, style_only)
+    state.load_file_into_code_viewer(str(a))
+
+    lines = state.current_file_lines
+    assert [line.status for line in lines] == [CodeLineStatus.ADVISORY, CodeLineStatus.WARNING,
+                                               CodeLineStatus.ERROR, CodeLineStatus.ADVISORY]
+    assert lines[0].can_suppress_line
+    state.suppress_code_line(lines[0])
+    assert state.current_file_lines[0].status == CodeLineStatus.SUPPRESSED
+    state.restore_code_line(state.current_file_lines[0])
+    assert state.current_file_lines[0].status == CodeLineStatus.ADVISORY
+
+
+def test_severity_visibility_filters_results_code_and_selection(state, src):
+    a = src / "a.c"
+    error = issue("error", a, 1, severity="Error")
+    advisory = issue("advisory", a, 2)
+    advisory.obligation = "권고(Advisory)"
+    same_line_advisory = issue("sameLineAdvisory", a, 1, severity="Style")
+    warning = issue("warning", a, 3)
+    set_results(state, error, advisory, same_line_advisory, warning)
+    state.load_file_into_code_viewer(str(a))
+    assert advisory.review_severity_display == "권고"
+    assert warning.review_severity_display == "경고"
+    assert len(state.filtered_defects) == len(state.rule_issue_groups) == 4
+
+    state.select_issue(advisory)
+    state.show_only_errors()
+    assert state.visible_severities == {"Error"}
+    assert state.filtered_defects == [error]
+    assert [g.rule_id for g in state.rule_issue_groups] == ["error"]
+    assert state.selected_issue is None
+    assert state.current_file_lines[0].status == CodeLineStatus.ERROR
+    assert state.current_file_lines[1].status == CodeLineStatus.NEUTRAL
+    assert state.current_file_lines[0].issues == [error]
+    assert state.target_roots[0].defect_count == 1
+
+    state.set_severity_visible("Warning", True)
+    assert state.filtered_defects == [error, warning]
+    state.show_all_severities()
+    assert len(state.filtered_defects) == 4
+    assert state.current_file_lines[1].status == CodeLineStatus.ADVISORY
+    for severity in ("Error", "Warning", "Advisory"):
+        state.set_severity_visible(severity, False)
+    assert state.filtered_defects == state.rule_issue_groups == []
+
+
 def test_rule_summary_order_and_preview(src):
     a, b = src / "a.c", src / "b.c"
     groups = build_rule_summary([issue("zz", a, 1), issue("aa", b, 1), issue("zz", a, 4), issue("mm", a, 99)])
@@ -101,12 +157,15 @@ def test_rule_summary_order_and_preview(src):
     assert "읽을 수 없습니다" in missing[0].occurrences[0].code_text
 
 
-def test_rule_group_expansion_is_kept(state, src):
+def test_rule_group_is_collapsed_by_default_and_expansion_is_kept(state, src):
     a = src / "a.c"
     set_results(state, issue("r1", a, 1), issue("r2", a, 2))
-    state.rule_issue_groups[0].is_expanded = False
+    assert all(not group.is_expanded for group in state.rule_issue_groups)
+    state.rule_issue_groups[0].is_expanded = True
+    rule_id = state.rule_issue_groups[0].rule_id
     state.refresh_filtered_defects()
-    assert state.rule_issue_groups[0].is_expanded is False
+    assert next(group for group in state.rule_issue_groups if group.rule_id == rule_id).is_expanded
+    assert all(not group.is_expanded for group in state.rule_issue_groups if group.rule_id != rule_id)
 
 
 def test_project_round_trip_restores_options_rules_and_suppression(state, src, tmp_path):

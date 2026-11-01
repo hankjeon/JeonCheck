@@ -24,10 +24,12 @@ STATUS_COLORS = {
     CodeLineStatus.SKIPPED: ("#484F58", "#161618"),
     CodeLineStatus.ERROR: ("#F85149", "#3B1D20"),
     CodeLineStatus.WARNING: ("#D29922", "#342814"),
+    CodeLineStatus.ADVISORY: ("#58A6FF", "#142334"),
     CodeLineStatus.SUPPRESSED: ("#8957E5", "#1F192C"),
 }
 
-SEVERITY_COLORS = {"Error": "#F85149", "Warning": "#D29922", "Style": "#58A6FF", "Info": "#9DA7B3"}
+SEVERITY_COLORS = {"Error": "#F85149", "Warning": "#D29922", "Advisory": "#58A6FF",
+                   "Style": "#58A6FF", "Info": "#9DA7B3"}
 
 _code_font_family = "monospace"
 

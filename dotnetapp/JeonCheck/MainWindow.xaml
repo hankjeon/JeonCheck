@@ -12,6 +12,35 @@
         Background="#1E1E1E"
         Foreground="#E6EDF3">
     <Window.Resources>
+        <Style x:Key="SeverityToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="#252526" />
+            <Setter Property="BorderBrush" Value="#4E5157" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+            <Setter Property="Opacity" Value="0.6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="CheckMark" Text="✓" Visibility="Collapsed" Margin="0,0,4,0" />
+                                <ContentPresenter />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                                <Setter Property="Background" Value="#30363D" />
+                                <Setter Property="BorderBrush" Value="#58A6FF" />
+                                <Setter Property="Opacity" Value="1" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="DarkTopMenuItemStyle" TargetType="MenuItem">
             <Setter Property="Foreground" Value="#E6EDF3" />
             <Setter Property="Background" Value="Transparent" />
@@ -558,15 +587,25 @@
                     <TabItem Header="{Binding DefectsTabHeader}">
                         <DockPanel Background="#1E1E1E">
                             <Border DockPanel.Dock="Top" Background="#252526" Padding="8,5" BorderBrush="#333337" BorderThickness="0,0,0,1">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="분류 필터:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
-                                    <ComboBox ItemsSource="{Binding DefectCategoryFilters}"
-                                              SelectedItem="{Binding SelectedDefectCategoryFilter}"
-                                              Width="145" Margin="0,0,14,0" VerticalAlignment="Center" />
-                                    <TextBlock Text="결함 검색:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
-                                    <TextBox Text="{Binding DefectSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                             Width="220" Padding="5,2" Background="#1E1E1E" Foreground="#E6EDF3" BorderBrush="#4E5157" />
-                                    <TextBlock Text="  (우클릭하여 특정 줄 예외 처리 또는 규칙 전체 제외 가능)" VerticalAlignment="Center" Foreground="#6E7681" FontSize="11.5" />
+                                <StackPanel>
+                                    <WrapPanel>
+                                        <TextBlock Text="분류 필터:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                        <ComboBox ItemsSource="{Binding DefectCategoryFilters}"
+                                                  SelectedItem="{Binding SelectedDefectCategoryFilter}"
+                                                  Width="145" Margin="0,0,14,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="결함 검색:" VerticalAlignment="Center" Foreground="#9DA7B3" Margin="0,0,6,0" />
+                                        <TextBox Text="{Binding DefectSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="220" Padding="5,2" Background="#1E1E1E" Foreground="#E6EDF3" BorderBrush="#4E5157" />
+                                        <TextBlock Text="  (우클릭하여 특정 줄 예외 처리 또는 규칙 전체 제외 가능)" VerticalAlignment="Center" Foreground="#6E7681" FontSize="11.5" />
+                                    </WrapPanel>
+                                    <WrapPanel Margin="0,5,0,0">
+                                        <TextBlock Text="표시:" Foreground="#9DA7B3" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <ToggleButton Content="🔴 오류" Foreground="#F85149" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowErrors, Mode=TwoWay}" />
+                                        <ToggleButton Content="🟠 경고" Foreground="#D29922" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowWarnings, Mode=TwoWay}" />
+                                        <ToggleButton Content="🔵 권고" Foreground="#58A6FF" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowAdvisories, Mode=TwoWay}" />
+                                        <Button Content="오류만" Style="{StaticResource DarkButtonStyle}" Padding="8,2" Click="ShowOnlyErrors_Click" />
+                                        <Button Content="모두 표시" Style="{StaticResource DarkButtonStyle}" Padding="8,2" Click="ShowAllSeverities_Click" />
+                                    </WrapPanel>
                                 </StackPanel>
                             </Border>
 
@@ -613,18 +652,18 @@
                                     </Style>
                                 </DataGrid.Resources>
                                 <DataGrid.Columns>
-                                    <DataGridTemplateColumn Header="심각도" Width="62" SortMemberPath="Severity">
+                                    <DataGridTemplateColumn Header="심각도" Width="62" SortMemberPath="ReviewSeverityRank">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <TextBlock x:Name="SeverityText" Text="{Binding SeverityDisplay}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="SeverityText" Text="{Binding ReviewSeverityDisplay}" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                 <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Error">
+                                                    <DataTrigger Binding="{Binding ReviewSeverity}" Value="Error">
                                                         <Setter TargetName="SeverityText" Property="Foreground" Value="#FF6B6B" />
                                                     </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                                                    <DataTrigger Binding="{Binding ReviewSeverity}" Value="Warning">
                                                         <Setter TargetName="SeverityText" Property="Foreground" Value="#F2CC60" />
                                                     </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Style">
+                                                    <DataTrigger Binding="{Binding ReviewSeverity}" Value="Advisory">
                                                         <Setter TargetName="SeverityText" Property="Foreground" Value="#79C0FF" />
                                                     </DataTrigger>
                                                 </DataTemplate.Triggers>
@@ -654,6 +693,14 @@
                                         <TextBox Text="{Binding DefectSearchText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                                                  Width="220" Padding="5,2" Background="#1E1E1E" Foreground="#E6EDF3" BorderBrush="#4E5157" />
                                     </WrapPanel>
+                                    <WrapPanel Margin="0,5,0,0">
+                                        <TextBlock Text="표시:" Foreground="#9DA7B3" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <ToggleButton Content="🔴 오류" Foreground="#F85149" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowErrors, Mode=TwoWay}" />
+                                        <ToggleButton Content="🟠 경고" Foreground="#D29922" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowWarnings, Mode=TwoWay}" />
+                                        <ToggleButton Content="🔵 권고" Foreground="#58A6FF" Style="{StaticResource SeverityToggleStyle}" IsChecked="{Binding ShowAdvisories, Mode=TwoWay}" />
+                                        <Button Content="오류만" Style="{StaticResource DarkButtonStyle}" Padding="8,2" Click="ShowOnlyErrors_Click" />
+                                        <Button Content="모두 표시" Style="{StaticResource DarkButtonStyle}" Padding="8,2" Click="ShowAllSeverities_Click" />
+                                    </WrapPanel>
                                     <TextBlock Text="{Binding RuleSummaryStatusText}" Foreground="#9DA7B3" FontSize="11.5" Margin="0,4,0,0" />
                                 </StackPanel>
                             </Border>
@@ -663,6 +710,12 @@
                                           Foreground="#E6EDF3" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                           VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                           SelectedItemChanged="RuleSummaryTree_SelectedItemChanged">
+                                    <TreeView.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="모두 접기" Click="RuleSummaryCollapseAll_Click" />
+                                            <MenuItem Header="모두 펼치기" Click="RuleSummaryExpandAll_Click" />
+                                        </ContextMenu>
+                                    </TreeView.ContextMenu>
                                     <TreeView.ItemContainerStyle>
                                         <Style TargetType="TreeViewItem">
                                             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -693,7 +746,7 @@
                                         </DataTemplate>
                                     </TreeView.Resources>
                                 </TreeView>
-                                <TextBlock Text="표시할 진단이 없습니다. 분석 결과와 검색·분류 조건을 확인하십시오."
+                                <TextBlock Text="표시할 진단이 없습니다. 분석 결과와 검색·분류·심각도 조건을 확인하십시오."
                                            Foreground="#9DA7B3" Margin="12" TextWrapping="Wrap" IsHitTestVisible="False">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">

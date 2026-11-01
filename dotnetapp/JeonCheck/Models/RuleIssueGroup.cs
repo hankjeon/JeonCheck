@@ -4,7 +4,7 @@ namespace JeonCheck.Models;
 
 public class RuleIssueGroup : INotifyPropertyChanged
 {
-    private bool _isExpanded = true;
+    private bool _isExpanded = false;
 
     public string RuleId { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;

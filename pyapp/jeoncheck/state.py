@@ -96,6 +96,7 @@ class AppState:
         self.category_filters: list[str] = list(DEFAULT_CATEGORY_FILTERS)
         self.search_text = ""
         self.category_filter = ALL_CATEGORIES
+        self.visible_severities = {"Error", "Warning", "Advisory"}
 
         self.target_roots: list[SourceTreeNode] = []
         self.non_target_roots: list[SourceTreeNode] = []
@@ -163,7 +164,7 @@ class AppState:
 
     @property
     def rule_summary_status_text(self) -> str:
-        return f"{len(self.rule_issue_groups)}개 규칙 · {len(self.filtered_defects)}건 (현재 검색·분류·예외 처리 기준)"
+        return f"{len(self.rule_issue_groups)}개 규칙 · {len(self.filtered_defects)}건 (현재 검색·분류·심각도·예외 처리 기준)"
 
     @property
     def notes_tab_header(self) -> str:
@@ -397,7 +398,7 @@ class AppState:
             if first:
                 self.load_file_into_code_viewer(first.full_path)
         self.select_issue(self.filtered_defects[0] if self.filtered_defects else None)
-        self.set_status(f"분석 완료: 결함 {len(self.filtered_defects)}건 검출 (참고 노트 {len(self.notes)}건, "
+        self.set_status(f"분석 완료: 현재 표시 결함 {len(self.filtered_defects)}건 (참고 노트 {len(self.notes)}건, "
                         f"예외 무시 {len(self.suppressed)}건)")
 
     def run_analysis_sync(self) -> None:
@@ -449,6 +450,8 @@ class AppState:
         for d in self._all_raw_defects:
             if d.rule_id.lower() not in enabled or d.suppression_key in suppressed_keys:
                 continue
+            if d.review_severity not in self.visible_severities:
+                continue
             if self.category_filter and self.category_filter != ALL_CATEGORIES \
                     and d.category.lower() != self.category_filter.lower():
                 continue
@@ -456,6 +459,8 @@ class AppState:
                 continue
             filtered.append(d)
         self.filtered_defects = filtered
+        if self.selected_issue is not None and self.selected_issue.review_severity not in self.visible_severities:
+            self.select_issue(None)
 
         expanded = {g.rule_id.lower(): g.is_expanded for g in self.rule_issue_groups}
         groups = build_rule_summary(filtered)
@@ -476,6 +481,26 @@ class AppState:
     def set_category_filter(self, category: str) -> None:
         if category != self.category_filter:
             self.category_filter = category
+            self.refresh_filtered_defects()
+
+    def set_severity_visible(self, severity: str, visible: bool) -> None:
+        selected = set(self.visible_severities)
+        if visible:
+            selected.add(severity)
+        else:
+            selected.discard(severity)
+        if selected != self.visible_severities:
+            self.visible_severities = selected
+            self.refresh_filtered_defects()
+
+    def show_only_errors(self) -> None:
+        if self.visible_severities != {"Error"}:
+            self.visible_severities = {"Error"}
+            self.refresh_filtered_defects()
+
+    def show_all_severities(self) -> None:
+        if self.visible_severities != {"Error", "Warning", "Advisory"}:
+            self.visible_severities = {"Error", "Warning", "Advisory"}
             self.refresh_filtered_defects()
 
     def load_file_into_code_viewer(self, file_path: str) -> None:
@@ -512,11 +537,13 @@ class AppState:
                 defect_lines += 1
                 analyzed += 1
                 cl.issues = issues
-                cl.status = CodeLineStatus.ERROR if any(x.severity.lower() == "error" for x in issues) \
-                    else CodeLineStatus.WARNING
+                has_error = any(x.review_severity == "Error" for x in issues)
+                has_warning = any(x.review_severity == "Warning" for x in issues)
+                cl.status = (CodeLineStatus.ERROR if has_error else
+                             CodeLineStatus.WARNING if has_warning else CodeLineStatus.ADVISORY)
                 extra = f" +{len(issues) - 1}" if len(issues) > 1 else ""
                 cl.inline_annotation = f"[{issues[0].rule_id}{extra}]"
-                cl.tooltip_text = "\n\n".join(f"[{x.rule_id} - {x.severity_display}]\n{x.message}" for x in issues)
+                cl.tooltip_text = "\n\n".join(f"[{x.rule_id} - {x.review_severity_display}]\n{x.message}" for x in issues)
             elif sup:
                 suppressed_lines += 1
                 analyzed += 1
