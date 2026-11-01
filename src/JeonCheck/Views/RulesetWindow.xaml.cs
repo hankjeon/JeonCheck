@@ -77,11 +77,10 @@ public partial class RulesetWindow : Window
         if (RulesDataGrid.SelectedItem is RuleInfo rule)
         {
             PreviewTitleText.Text = $"[{rule.Id}] {rule.Title}";
-            PreviewMetaText.Text = $"분류: {rule.Category}  |  등급: {rule.Obligation}  |  기본 심각도: {rule.Severity}";
+            PreviewMetaText.Text = $"분류: {rule.Category}  |  {rule.ObligationDisplay}  |  기본 심각도: {rule.SeverityDisplay}";
             PreviewDescText.Text = rule.Description;
-            const string noExample = "(이 규칙에는 등록된 코드 예시가 없습니다. 위 설명을 참고하십시오.)";
-            PreviewBadCodeText.Text = string.IsNullOrWhiteSpace(rule.BadExample) ? noExample : rule.BadExample;
-            PreviewGoodCodeText.Text = string.IsNullOrWhiteSpace(rule.GoodExample) ? noExample : rule.GoodExample;
+            PreviewBadCodeText.Text = rule.BadExampleDisplay;
+            PreviewGoodCodeText.Text = rule.GoodExampleDisplay;
         }
     }
 

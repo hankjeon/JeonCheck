@@ -591,7 +591,7 @@ public class CppcheckRunner
                 {
                     string korNoteMsg = id.Equals("missingInclude", StringComparison.OrdinalIgnoreCase)
                         ? $"[참조 헤더 누락 안내] {rawMsg} (해당 헤더 없이 가능한 범위까지 분석을 계속 수행했습니다. 필요 시 비대상/참조 코드에 헤더 폴더를 추가하세요.)"
-                        : $"[표준 헤더 안내] {rawMsg} (내장 표준 라이브러리 설정(std.cfg)으로 대체하여 정상 분석되었습니다.)";
+                        : $"[표준 헤더 누락 안내] {rawMsg} (내장 라이브러리 모델을 활용해 가능한 범위를 분석했습니다. 모델은 실제 헤더의 타입·선언·매크로를 완전히 대체하지 않으므로 결과가 제한될 수 있습니다. 필요 시 참조 코드에 해당 타겟의 헤더 폴더를 추가하세요.)";
 
                     result.NotesAndInfos.Add(new AnalysisIssue
                     {
@@ -684,12 +684,10 @@ public class CppcheckRunner
                     Id = id,
                     Category = "Cppcheck 기본 검사",
                     Severity = NormalizeSeverity(severity),
-                    Obligation = severity.Equals("error", StringComparison.OrdinalIgnoreCase) ? "치명(Critical)" : "권고(Advisory)",
+                    Obligation = "미분류",
                     Title = $"Cppcheck 검출 ({id})",
-                    Summary = rawMsg,
-                    Description = $"Cppcheck 정적 분석 엔진이 검출한 코드 품질/안전성 항목입니다.\n원문 메시지: {rawMsg}",
-                    BadExample = "/* 검출된 라인의 수식 및 변수 상태를 확인하십시오. */",
-                    GoodExample = "/* 경계 조건 및 타입/포인터 유효성을 방어 처리하십시오. */",
+                    Summary = "개별 한글 해설이 아직 등록되지 않은 진단입니다. 원문과 해당 코드의 타입·값·실행 경로를 확인하십시오.",
+                    Description = $"이 Cppcheck 세부 규칙의 개별 한글 해설과 코드 예시는 아직 등록되지 않았습니다. 원문 진단에서 문제가 된 연산과 발생 조건을 확인한 뒤 원인에 맞게 수정하십시오.\n원문 진단: {rawMsg}",
                     IsEnabled = true
                 };
             }

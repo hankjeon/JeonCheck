@@ -535,6 +535,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RuleSummaryTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is RuleIssueOccurrence occurrence)
+        {
+            ViewModel.SelectedIssue = occurrence.Issue;
+            NavigateToFileAndLine(occurrence.Issue.FilePath, occurrence.Issue.Line);
+        }
+    }
+
     private void CodeViewerListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // 결함 목록에서 같은 줄의 다른 결함을 선택해 이동한 경우에는 그 선택을 유지하고,
@@ -548,6 +557,11 @@ public partial class MainWindow : Window
 
     private void NavigateToFileAndLine(string filePath, int line)
     {
+        if (!File.Exists(filePath))
+        {
+            ViewModel.StatusMessage = $"이동할 파일을 찾을 수 없습니다: {filePath}";
+            return;
+        }
         if (!string.Equals(
                 AnalysisIssue.NormalizePath(ViewModel.CurrentCodeFilePath),
                 AnalysisIssue.NormalizePath(filePath),
