@@ -69,6 +69,24 @@ def test_sample_analysis_with_clang_tidy(sample_copy):
     assert "bugprone-branch-clone" in ids
 
 
+@pytest.mark.parametrize("clang_tidy", [False, True])
+def test_real_analysis_reports_progress_up_to_100(sample_copy, clang_tidy):
+    if clang_tidy and paths.clang_tidy_executable() is None:
+        pytest.skip("clang-tidy 미설치")
+    s = AppState(load_sample=False)
+    s.enable_clang_tidy = clang_tidy
+    s.add_target_path(str(sample_copy / "src"))
+    req = s.begin_analysis()
+    events = []
+    req.progress = lambda pct, msg: events.append((pct, msg))
+    s.finish_analysis(req, result=req.run())
+    percents = [p for p, _ in events]
+    assert percents == sorted(percents) and percents[-1] == 100.0
+    messages = " ".join(m for _, m in events)
+    assert "Cppcheck 분석 중" in messages and "AST 및 MISRA 정밀 분석 중 (1/1): dsp_motor_ctrl.c" in messages
+    assert ("Clang-Tidy 심층 분석 중 (1/1)" in messages) == clang_tidy
+
+
 def test_cancel_after_dump_creation_cleans_up(sample_copy, monkeypatch):
     from jeoncheck.engine import runner
     from jeoncheck.engine.process import AnalysisCancelled

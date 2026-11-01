@@ -7,19 +7,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
 import uuid
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .. import paths
 from ..models import (AnalysisIssue, FileLineCoverage, RuleInfo, SourceTreeNode, TargetPreset,
                       make_position_key, normalize_path)
 from .clang_tidy import run_clang_tidy, split_defines
 from .include_resolver import IncludePathResolver
-from .process import AnalysisCancelled, run_process, summarize_error_lines
+from .process import AnalysisCancelled, run_parallel, run_process, summarize_error_lines
+
+# 진행률 알림: (0~100 백분율, 현재 단계 설명)
+ProgressCallback = Callable[[float, str], None]
+# Cppcheck 표준 출력의 진행 줄: "3/35 files checked 8% done", "Checking C:\...\lapi.c ..."
+_CPPCHECK_PROGRESS_RE = re.compile(r"^(?P<done>\d+)/(?P<total>\d+) files checked (?P<pct>\d+)% done")
+_CPPCHECK_CHECKING_RE = re.compile(r"^Checking (?P<file>.+?)(?:: .*)? \.\.\.$")  # "파일: 설정" 형태도 허용
 
 DUMP_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dump_worker.py")
 NOTE_CATEGORY = "포함 파일 / 환경 안내"
@@ -40,6 +48,23 @@ _LIMIT_NOTES_LOWER = {k.lower(): v for k, v in ANALYSIS_LIMIT_NOTES.items()}
 
 class ToolNotFoundError(RuntimeError):
     pass
+
+
+class _Progress:
+    """단계별 구간(start~end %) 안에서 진행률을 계산해 전달한다. 여러 스레드에서 호출해도 뒤로 가지 않는다."""
+
+    def __init__(self, callback: ProgressCallback | None):
+        self.callback = callback
+        self.percent = 0.0
+        self.lock = threading.Lock()
+
+    def report(self, percent: float, message: str) -> None:
+        if self.callback is None:
+            return
+        with self.lock:
+            self.percent = max(self.percent, min(100.0, percent))
+            value = self.percent
+        self.callback(value, message)
 
 
 @dataclass
@@ -140,8 +165,10 @@ def run_analysis(
     non_target_roots: list[SourceTreeNode],
     all_rules: list[RuleInfo],
     cancel: threading.Event | None = None,
+    progress: ProgressCallback | None = None,
 ) -> AnalysisRunResult:
     result = AnalysisRunResult()
+    prog = _Progress(progress)
     cppcheck = paths.cppcheck_executable()
     if not cppcheck:
         raise ToolNotFoundError("Cppcheck 실행 파일을 찾을 수 없습니다. " + paths.install_hint("cppcheck"))
@@ -185,8 +212,12 @@ def run_analysis(
             f'"{a}"' if " " in a else a for a in base_args + input_files)
 
         ctx = _PassContext(cppcheck, str(addon_dir), base_args, base_dir, target_norm, rules_by_id, result, keys,
-                           cancel)
+                           cancel, prog)
         clang_inputs = list(input_files)
+        # 진행률 구간 (WPF 앱과 같은 비율): 1차 분석 → 2차(단독 헤더) 분석 → Clang-Tidy
+        clang_tidy = paths.clang_tidy_executable() if enable_clang_tidy else None
+        first_end, second_end = (50.0, 55.0) if clang_tidy else (90.0, 98.0)
+        prog.report(2.0, f"Cppcheck 정적 분석 준비 중 ({len(input_files)}개 파일)...")
         guard = _DumpFileGuard()
         targets_json = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
         try:
@@ -195,7 +226,7 @@ def run_analysis(
             ctx.targets_json = targets_json.name
 
             # 3~5. 1차 분석: 소스 파일 기준
-            ctx.run_pass(input_files, guard)
+            ctx.run_pass(input_files, guard, 2.0, first_end)
 
             # 5-1. 2차 분석: 어느 소스에도 포함되지 않은 대상 헤더를 직접 검사
             if headers_excluded:
@@ -208,15 +239,18 @@ def run_analysis(
                         f"[분석 범위 안내] 어느 소스 파일(.c)에도 포함되지 않은 검사 대상 헤더 {len(uncovered)}개({names})를 "
                         "단독으로 직접 분석했습니다. 소스 문맥(앞서 포함되는 헤더의 타입·매크로 정의) 없이 분석되므로 일부 결과가 "
                         "실제와 다를 수 있습니다."))
-                    ctx.run_pass(uncovered, guard)
+                    ctx.run_pass(uncovered, guard, first_end, second_end)
                     clang_inputs += uncovered
 
             # 6. Clang-Tidy (옵션이 켜져 있고 실행 파일이 있을 때)
-            clang_tidy = paths.clang_tidy_executable() if enable_clang_tidy else None
             if clang_tidy:
+                def clang_progress(done: int, total: int, name: str) -> None:
+                    prog.report(second_end + (99.0 - second_end) * done / total,
+                                f"Clang-Tidy 심층 분석 중 ({done}/{total}): {name}")
+
                 result.defects += run_clang_tidy(clang_tidy, preset, c_standard, custom_defines, clang_inputs,
                                                  include_dirs, target_norm, rules_by_id, keys.position, result.notes,
-                                                 cancel)
+                                                 cancel, clang_progress)
             elif enable_clang_tidy:
                 result.notes.append(create_note(
                     "clangTidyMissing", "Clang-Tidy 미설치 안내",
@@ -226,13 +260,15 @@ def run_analysis(
             guard.close()
             os.unlink(targets_json.name)
 
+    prog.report(100.0, "분석 결과 정리 중...")
     # 정렬: 파일명 -> 줄 -> 열 -> 규칙
     result.defects.sort(key=lambda d: (d.file_name.lower(), d.line, d.column, d.rule_id))
     return result
 
 
 class _PassContext:
-    def __init__(self, cppcheck, addon_dir, base_args, base_dir, target_norm, rules_by_id, result, keys, cancel):
+    def __init__(self, cppcheck, addon_dir, base_args, base_dir, target_norm, rules_by_id, result, keys, cancel,
+                 progress: _Progress | None = None):
         self.cppcheck = cppcheck
         self.addon_dir = addon_dir
         self.base_args = base_args
@@ -242,6 +278,7 @@ class _PassContext:
         self.result = result
         self.keys = keys
         self.cancel = cancel
+        self.progress = progress or _Progress(None)
         self.targets_json = ""
 
     def abs_path(self, path: str) -> str:
@@ -249,13 +286,32 @@ class _PassContext:
             return ""
         return os.path.abspath(path if os.path.isabs(path) else os.path.join(self.base_dir, path))
 
-    def run_pass(self, input_files: list[str], guard: _DumpFileGuard) -> None:
-        """Cppcheck 1회 실행: 프로세스 실행 → XML 결과 해석 → dump별 misra.py·자체 검사·커버리지."""
+    def run_pass(self, input_files: list[str], guard: _DumpFileGuard, start_pct: float = 0.0,
+                 end_pct: float = 100.0) -> None:
+        """Cppcheck 1회 실행: 프로세스 실행 → XML 결과 해석 → dump별 misra.py·자체 검사·커버리지.
+
+        진행률은 start_pct~end_pct 구간에서 Cppcheck 40%, dump별 검사 60% 비율로 표시한다.
+        """
         for f in input_files:
             guard.protect(f + ".dump")
             guard.protect(f + ".ctu-info")
 
-        code, out, err = run_process([self.cppcheck, *self.base_args, *input_files], self.base_dir, self.cancel)
+        cppcheck_end = start_pct + (end_pct - start_pct) * 0.4
+        checking = [""]
+
+        def on_cppcheck_line(line: str) -> None:
+            m = _CPPCHECK_CHECKING_RE.match(line)
+            if m:
+                checking[0] = os.path.basename(m.group("file"))
+                self.progress.report(self.progress.percent, f"Cppcheck 분석 중: {checking[0]}")
+                return
+            m = _CPPCHECK_PROGRESS_RE.match(line)
+            if m:
+                pct = start_pct + (cppcheck_end - start_pct) * int(m.group("pct")) / 100.0
+                self.progress.report(pct, f"Cppcheck 분석 중 ({m.group('done')}/{m.group('total')}): {checking[0]}")
+
+        code, out, err = run_process([self.cppcheck, *self.base_args, *input_files], self.base_dir, self.cancel,
+                                     on_stdout_line=on_cppcheck_line)
         if not parse_cppcheck_xml(err, self.target_norm, self.rules_by_id, self.result, self.keys, self.abs_path):
             detail = summarize_error_lines(out + err)
             if not detail:
@@ -268,23 +324,40 @@ class _PassContext:
                 f"[Cppcheck 안내] Cppcheck가 종료 코드 {code}(으)로 끝났습니다. 일부 파일의 분석 결과가 누락되었을 수 있습니다. "
                 f"{summarize_error_lines(out)}".strip()))
 
+        if self.cancel is not None and self.cancel.is_set():
+            raise AnalysisCancelled()
+        # dump별 misra.py와 자체 검사는 서로 독립이므로 CPU 코어 수만큼 동시에 실행한다.
+        # 결과 반영(중복 제거 순서)은 결과가 매번 같도록 입력 파일 순서대로 한다.
+        with_dump = [src for src in input_files if guard.generated_by_this_run(src + ".dump")]
+        total = len(with_dump)
+
+        def on_done(count: int, index: int) -> None:
+            self.progress.report(cppcheck_end + (end_pct - cppcheck_end) * count / total,
+                                 f"AST 및 MISRA 정밀 분석 중 ({count}/{total}): {os.path.basename(with_dump[index])}")
+
+        outputs = dict(zip(with_dump, run_parallel(
+            [lambda d=src + ".dump": (self._run_misra(d), self._run_worker(d)) for src in with_dump],
+            self.cancel, on_done)))
+
         for src in input_files:
-            if self.cancel is not None and self.cancel.is_set():
-                raise AnalysisCancelled()
-            dump = src + ".dump"
             name = os.path.basename(src)
-            if not guard.generated_by_this_run(dump):
+            if src not in outputs:
                 self.result.notes.append(create_note(
                     "dumpMissing", "AST 덤프 파일 미생성",
                     f"[분석 범위 안내] '{name}'의 AST 덤프(.dump) 파일이 생성되지 않아 라인별 검사 상태 표시와 MISRA·축소 변환 "
                     "검사를 수행하지 못했습니다. 소스 폴더에 쓰기 권한이 있는지, 구문 오류가 없는지 확인하세요.", src))
                 continue
-            self._run_misra(dump, name, src)
-            self._run_worker(dump, name, src)
+            misra_output, worker_output = outputs[src]
+            self._apply_misra(misra_output, name, src)
+            self._apply_worker(worker_output, name, src)
 
-    def _run_misra(self, dump: str, name: str, src: str) -> None:
+    def _run_misra(self, dump: str) -> tuple[int, str, str]:
+        """작업 스레드에서 실행: misra.py 프로세스만 실행하고 출력을 돌려준다."""
         misra_py = os.path.join(self.addon_dir, "misra.py")
-        code, out, err = run_process([sys.executable, misra_py, "--cli", dump], self.base_dir, self.cancel)
+        return run_process([sys.executable, misra_py, "--cli", dump], self.base_dir, self.cancel)
+
+    def _apply_misra(self, output: tuple[int, str, str], name: str, src: str) -> None:
+        code, out, err = output
         violations = parse_misra_cli_output(out)
         if code != 0 and not violations:
             self.result.notes.append(create_note(
@@ -310,10 +383,14 @@ class _PassContext:
             sev = normalize_severity(v["severity"]) if rule.is_unregistered else None
             self.result.defects.append(issue_from_rule(rule, rule_id, msg, file, v["line"], v["column"], sev))
 
-    def _run_worker(self, dump: str, name: str, src: str) -> None:
-        code, out, err = run_process(
+    def _run_worker(self, dump: str) -> tuple[int, str, str]:
+        """작업 스레드에서 실행: 자체 검사·커버리지 프로세스만 실행하고 출력을 돌려준다."""
+        return run_process(
             [sys.executable, DUMP_WORKER, dump, "--addon-dir", self.addon_dir, "--targets", self.targets_json,
              "--base-dir", self.base_dir], self.base_dir, self.cancel)
+
+    def _apply_worker(self, output: tuple[int, str, str], name: str, src: str) -> None:
+        code, out, err = output
         try:
             data = json.loads(out)
         except json.JSONDecodeError:

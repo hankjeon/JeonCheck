@@ -1,7 +1,8 @@
 """화면 상태와 동작 로직 (WPF 앱 MainViewModel의 Qt 비의존 포팅).
 
 UI는 `listeners`에 콜백을 등록해 변경 알림(이벤트 이름)을 받고, 필요한 부분을 다시 그린다.
-이벤트: "status", "options", "trees", "results", "code", "rules", "project", "selection", "analyzing", "recent"
+이벤트: "status", "options", "trees", "results", "code", "rules", "project", "selection", "analyzing", "recent",
+      "progress"
 """
 
 from __future__ import annotations
@@ -70,11 +71,13 @@ class AnalysisRequest:
     non_target_roots: list[SourceTreeNode]
     rules: list[RuleInfo]
     cancel: threading.Event = field(default_factory=threading.Event)
+    # 진행률 알림 (0~100, 단계 설명). 분석 스레드에서 호출된다.
+    progress: Callable[[float, str], None] | None = None
 
     def run(self) -> AnalysisRunResult:
         return run_analysis(self.preset, self.c_standard, self.custom_defines, self.force_all_ifdef_configs,
                             self.enable_clang_tidy, self.target_roots, self.non_target_roots, self.rules,
-                            self.cancel)
+                            self.cancel, self.progress)
 
 
 class AppState:
@@ -115,6 +118,7 @@ class AppState:
         self.recent_projects: list[str] = []
         self.status_message = "준비 완료"
         self._analysis: AnalysisRequest | None = None
+        self.analysis_progress_percent = 0.0
 
         self._initialize(load_sample)
 
@@ -138,6 +142,12 @@ class AppState:
         if not self.current_project_file_path:
             return "전검사 (JeonCheck) - 임베디드 C 정적 분석 도우미 (미저장 프로젝트)"
         return f"전검사 (JeonCheck) - {os.path.basename(self.current_project_file_path)}"
+
+    @property
+    def run_button_text(self) -> str:
+        if self.is_analyzing:
+            return f"⏳ 정적 분석 중 ({self.analysis_progress_percent:.0f}%)"
+        return "▶ 정적 분석 시작"
 
     @property
     def ruleset_button_text(self) -> str:
@@ -352,7 +362,8 @@ class AppState:
                               [r.clone_tree() for r in self.target_roots],
                               [r.clone_tree() for r in self.non_target_roots], list(self.all_rules))
         self._analysis = req
-        self.notify("analyzing")
+        self.analysis_progress_percent = 0.0
+        self.notify("analyzing", "progress")
         self.set_status(f"[{self.selected_preset.name}] 프리셋으로 {count}개 파일 정적 분석 및 AST 검사 중... "
                         "(취소하려면 [■ 분석 취소])")
         return req
@@ -363,7 +374,8 @@ class AppState:
         current = self._analysis is req
         if current:
             self._analysis = None
-            self.notify("analyzing")
+            self.analysis_progress_percent = 0.0
+            self.notify("analyzing", "progress")
         # 취소 요청 직후 분석이 먼저 끝난 경우도 취소로 안내한다.
         if cancelled or (not current and req.cancel.is_set()):
             self.set_status("분석이 취소되었습니다. (실행 중이던 분석 도구 프로세스는 종료되었습니다)")
@@ -398,13 +410,22 @@ class AppState:
         except Exception as ex:  # noqa: BLE001
             self.finish_analysis(req, error=ex)
 
+    def report_progress(self, req: AnalysisRequest, percent: float, message: str) -> None:
+        """분석 진행률 반영 (UI 스레드에서 호출). 이미 끝났거나 취소된 이전 분석의 알림은 무시한다."""
+        if self._analysis is not req:
+            return
+        self.analysis_progress_percent = max(self.analysis_progress_percent, min(100.0, percent))
+        self.notify("progress")
+        self.set_status(f"[{self.analysis_progress_percent:.0f}%] {message}")
+
     def cancel_analysis(self) -> None:
         req = self._analysis
         if req is None:
             return
         self._analysis = None
+        self.analysis_progress_percent = 0.0
         req.cancel.set()
-        self.notify("analyzing")
+        self.notify("analyzing", "progress")
         self.set_status("분석을 취소하고 있습니다...")
 
     # ---------------------------------------------------------------- 결과 필터·코드 뷰어

@@ -7,10 +7,11 @@ import re
 import shutil
 import tempfile
 import threading
+from typing import Callable
 
 from .. import paths
 from ..models import AnalysisIssue, RuleInfo, TargetPreset, make_position_key, normalize_path
-from .process import run_process, summarize_error_lines
+from .process import run_parallel, run_process, summarize_error_lines
 
 INCLUDE_QUOTE_RE = re.compile(r'^\s*#\s*include\s*["<]([^">]+)[" >]', re.MULTILINE)
 # Windows 드라이브 문자(C:)가 있어도 없어도 해석한다.
@@ -42,7 +43,9 @@ def run_clang_tidy(
     position_keys: set[str],
     notes: list[AnalysisIssue],
     cancel: threading.Event | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> list[AnalysisIssue]:
+    """파일별로 Clang-Tidy를 CPU 코어 수만큼 동시에 실행한다. progress(완료 개수, 전체 개수, 파일명)."""
     if not input_files:
         return []
     stub_root = tempfile.mkdtemp(prefix="jeoncheck_stubs_")
@@ -53,27 +56,47 @@ def run_clang_tidy(
         builtin_inc = str(paths.clang_tidy_include_directory())
         _create_missing_header_stubs(input_files, include_dirs, builtin_inc, stub_root, stub_base)
 
-        args = [exe, "-checks=-*,bugprone-*,cert-*,clang-analyzer-*", "--quiet", *input_files, "--",
-                "-xc", f"-std={c_standard}", f"--target={preset.clang_target or 'armv7r-none-eabi'}", "-nostdinc"]
+        compile_args = ["-xc", f"-std={c_standard}", f"--target={preset.clang_target or 'armv7r-none-eabi'}",
+                        "-nostdinc"]
         if os.path.isdir(builtin_inc):
-            args += ["-isystem", builtin_inc]
+            compile_args += ["-isystem", builtin_inc]
         for inc in include_dirs:
-            args += ["-I", inc]
+            compile_args += ["-I", inc]
         # 누락 헤더 더미 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
-        args += ["-I", stub_base]
-        args += [f"-D{d.strip()}" for d in preset.defines if d.strip()]
-        args += [f"-D{d}" for d in split_defines(custom_defines)]
-        args.append("-Wno-everything")
+        compile_args += ["-I", stub_base]
+        compile_args += [f"-D{d.strip()}" for d in preset.defines if d.strip()]
+        compile_args += [f"-D{d}" for d in split_defines(custom_defines)]
+        compile_args.append("-Wno-everything")
 
-        code, out, err = run_process(args, cwd=str(paths.root_directory()), cancel=cancel)
-        output = out + "\n" + err
-        issues = parse_clang_tidy_output(output, target_files, rules_by_id, position_keys)
-        if code != 0:
+        cwd = str(paths.root_directory())
+        total = len(input_files)
+
+        def task(file: str):
+            return lambda: run_process([exe, "-checks=-*,bugprone-*,cert-*,clang-analyzer-*", "--quiet", file, "--",
+                                        *compile_args], cwd=cwd, cancel=cancel)
+
+        def on_done(count: int, index: int) -> None:
+            if progress is not None:
+                progress(count, total, os.path.basename(input_files[index]))
+
+        outputs = run_parallel([task(f) for f in input_files], cancel, on_done)
+
+        # 헤더의 같은 진단은 여러 파일에서 반복되므로 입력 순서대로 해석하며 위치 키로 중복을 제거한다.
+        issues: list[AnalysisIssue] = []
+        failed: list[tuple[int, str]] = []
+        for code, out, err in outputs:
+            output = out + "\n" + err
+            issues += parse_clang_tidy_output(output, target_files, rules_by_id, position_keys)
+            if code != 0:
+                failed.append((code, output))
+        if failed:
+            codes = ", ".join(sorted({str(c) for c, _ in failed}))
+            detail = next((d for d in (summarize_error_lines(o) for _, o in failed) if d), "")
             notes.append(AnalysisIssue(
                 rule_id="clangTidyExit", category="포함 파일 / 환경 안내", severity="Info", obligation="참고(Note)",
                 title="Clang-Tidy 비정상 종료 안내",
-                message=(f"[Clang-Tidy 안내] Clang-Tidy가 종료 코드 {code}(으)로 끝났습니다. 컴파일 오류가 있는 파일은 "
-                         f"Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {summarize_error_lines(output)}").strip(),
+                message=(f"[Clang-Tidy 안내] Clang-Tidy가 {len(failed)}개 파일에서 종료 코드 {codes}(으)로 끝났습니다. "
+                         f"컴파일 오류가 있는 파일은 Clang-Tidy 결과가 일부 누락되었을 수 있습니다. {detail}").strip(),
                 is_info_or_note=True))
         return issues
     finally:

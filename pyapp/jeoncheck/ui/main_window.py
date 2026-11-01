@@ -30,10 +30,13 @@ class AnalysisWorker(QThread):
     """백그라운드에서 분석을 실행하고 결과를 메인 스레드로 전달한다."""
 
     done = Signal(object, object, object, bool)  # 요청, 결과, 오류, 취소 여부
+    progress = Signal(object, float, str)  # 요청, 진행률(0~100), 단계 설명
 
     def __init__(self, req: AnalysisRequest, parent=None):
         super().__init__(parent)
         self.req = req
+        # 분석 스레드에서 호출되므로 시그널로 UI 스레드에 넘긴다.
+        req.progress = lambda pct, msg: self.progress.emit(req, pct, msg)
 
     def run(self) -> None:
         try:
@@ -201,6 +204,7 @@ class MainWindow(QMainWindow):
         self.ruleset_button = self._button("", self._open_ruleset)
         self.cancel_button = self._button("■ 분석 취소", self.state.cancel_analysis, "danger")
         self.analyze_button = self._button("▶ 정적 분석 시작", self._start_analysis, "primary")
+        self.analyze_button.setMinimumWidth(200)  # 진행률 문구가 바뀌어도 버튼 폭이 흔들리지 않게 함
         row1.addWidget(self.ruleset_button)
         row1.addWidget(self.cancel_button)
         row1.addWidget(self.analyze_button)
@@ -426,6 +430,7 @@ class MainWindow(QMainWindow):
             "project": lambda: self.setWindowTitle(self.state.project_title),
             "selection": self._sync_detail,
             "analyzing": self._sync_analyzing,
+            "progress": self._sync_progress,
         }.get(event)
         if handler:
             handler()
@@ -592,6 +597,26 @@ class MainWindow(QMainWindow):
         busy = self.state.is_analyzing
         self.analyze_button.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
+        self._sync_progress()
+
+    def _sync_progress(self) -> None:
+        """분석 중에는 [정적 분석 시작] 버튼을 왼쪽부터 진행률만큼 녹색으로 채운다 (WPF 앱과 같은 방식)."""
+        self.analyze_button.setText(self.state.run_button_text)
+        if not self.state.is_analyzing:
+            self.analyze_button.setStyleSheet("")
+            return
+        ratio = self.state.analysis_progress_percent / 100.0
+        filled, empty = "#2EA043", "#122618"
+        if ratio <= 0.0:
+            background = empty
+        elif ratio >= 1.0:
+            background = filled
+        else:
+            edge = min(1.0, ratio + 0.001)
+            background = (f"qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {filled}, stop:{ratio:.3f} {filled}, "
+                          f"stop:{edge:.3f} {empty}, stop:1 {empty})")
+        self.analyze_button.setStyleSheet(
+            f"QPushButton#primary:disabled {{ background: {background}; border-color: #3FB950; color: white; }}")
 
     # ================================================================ 사용자 동작
     def _preset_changed(self, index: int) -> None:
@@ -685,9 +710,13 @@ class MainWindow(QMainWindow):
             return
         worker = AnalysisWorker(req, self)
         worker.done.connect(self._analysis_done)
+        worker.progress.connect(self._analysis_progress)
         worker.finished.connect(lambda w=worker: self._workers.remove(w) if w in self._workers else None)
         self._workers.append(worker)
         worker.start()
+
+    def _analysis_progress(self, req, percent: float, message: str) -> None:
+        self.state.report_progress(req, percent, message)
 
     def _analysis_done(self, req, result, error, cancelled) -> None:
         self.state.finish_analysis(req, result=result, error=error, cancelled=cancelled)
