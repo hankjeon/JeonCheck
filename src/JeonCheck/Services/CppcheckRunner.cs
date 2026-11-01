@@ -569,17 +569,7 @@ public class CppcheckRunner
             else
             {
                 // rules_ko.json에 아직 등록되지 않은 Cppcheck 세부 ID도 한글 카테고리로 감싸서 제공
-                ruleInfo = new RuleInfo
-                {
-                    Id = id,
-                    Category = "Cppcheck 기본 검사",
-                    Severity = NormalizeSeverity(severity),
-                    Obligation = "미분류",
-                    Title = $"Cppcheck 검출 ({id})",
-                    Summary = "개별 한글 해설이 아직 등록되지 않은 진단입니다. 원문과 해당 코드의 타입·값·실행 경로를 확인하십시오.",
-                    Description = $"이 Cppcheck 세부 규칙의 개별 한글 해설과 코드 예시는 아직 등록되지 않았습니다. 원문 진단에서 문제가 된 연산과 발생 조건을 확인한 뒤 원인에 맞게 수정하십시오.\n원문 진단: {rawMsg}",
-                    IsEnabled = true
-                };
+                ruleInfo = RuleInfo.CreateUnregistered(id, NormalizeSeverity(severity), "Cppcheck");
             }
 
             if (!keys.TryAdd(id, file, line, col))
@@ -593,7 +583,7 @@ public class CppcheckRunner
             {
                 RuleId = id,
                 Category = ruleInfo.Category,
-                Severity = ruleInfo.Severity,
+                Severity = ruleInfo.IsUnregistered ? NormalizeSeverity(severity) : ruleInfo.Severity,
                 Obligation = ruleInfo.Obligation,
                 Title = ruleInfo.Title,
                 Message = displayMsg,

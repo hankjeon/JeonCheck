@@ -219,6 +219,7 @@ Test("dump XML 파싱 후 캐스트 대입 검사", () =>
 
 DescriptionTests.Run(Test);
 RuleSummaryTests.Run(Test);
+UnknownDiagnosticTests.Run(Test);
 
 Console.WriteLine($"회귀 테스트: 성공 {passed}, 실패 {failed}");
 return failed == 0 ? 0 : 1;

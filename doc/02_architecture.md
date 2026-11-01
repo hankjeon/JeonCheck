@@ -1,92 +1,92 @@
-# 02. 시스템 아키텍처 및 분석 엔진 설계서 (Architecture Design)
+# 02. 시스템 아키텍처 및 분석 엔진
 
-## 1. 전체 시스템 구조
+## 구성
 
-`전검사(JeonCheck)`는 .NET 10 WPF 기반의 **MVVM 아키텍처**를 따르며, 외부 프로세스인 `cppcheck.exe` 및 `clang-tidy.exe`와 내부 C# 정밀 분석 엔진(`DumpFileParser` + `MisraAndTypeAnalyzer`)이 결합된 하이브리드 정적 분석 파이프라인으로 동작한다.
+.NET 10 WPF UI와 `MainViewModel`, 외부 도구 실행 서비스, C# 분석 모델을 사용합니다. 별도의 `AnalysisOrchestrator` 클래스는 없으며 `CppcheckRunner`가 분석을 통합합니다.
 
 ```mermaid
 flowchart TD
-    UI["WPF UI Layer\n(MainWindow, RulesetWindow)"] --> VM["ViewModel Layer\n(MainViewModel)"]
-    VM --> PM["DataRepository\n(*.jcproj 저장/로드 & rules_ko.json)"]
-    VM --> Runner["CppcheckRunner\n(통합 분석 오케스트레이터)"]
-    
-    Runner --> CPP["tools/cppcheck/cppcheck.exe\n(XML 결함 & --dump 생성)"]
-    Runner --> CT["ClangTidyRunner\n(tools/clang-tidy/clang-tidy.exe)"]
-    
-    CPP --> XML["Cppcheck XML 결과\n(메모리/포인터 결함 & 누락 헤더 Info)"]
-    CPP --> DUMP["*.dump 파일\n(전처리 토큰 + AST + ValueType)"]
-    
-    DUMP --> Parser["DumpFileParser (C#)\n(검사 완료 줄 vs #ifdef 미검사 줄 판별)"]
-    Parser --> Analyzer["MisraAndTypeAnalyzer (C# Native)\n(암묵적 축소 변환 + MISRA C 2012 검사)"]
-    
-    CT --> Stub["누락 #include 자동 Stub 헤더 생성\n(중단 없는 CERT-C / bugprone / 경로 분석)"]
-    Stub --> Merger["결과 통합, 중복 제거 및 한글 해설 매핑"]
-    XML --> Merger
-    Analyzer --> Merger
-    Parser --> Merger
-    Merger --> VM
+    UI[MainWindow / RulesetWindow] --> VM[MainViewModel]
+    VM --> Data[DataRepository: 타겟·규칙·프로젝트]
+    VM --> Runner[CppcheckRunner]
+    Runner --> Include[IncludePathResolver: 포함 경로·포워딩 헤더]
+    Runner --> CPP[Cppcheck: XML 진단 + dump]
+    CPP --> XML[Cppcheck XML 결과 파싱]
+    CPP --> Parser[DumpFileParser]
+    Parser --> Native[EssentialTypeResolver + MisraAndTypeAnalyzer]
+    Runner --> CT[ClangTidyRunner: stub 준비 후 Clang-Tidy 실행]
+    XML --> Merge[위치 중복 제거 + 한글 해설 연결]
+    Native --> Merge
+    CT --> Merge
+    Merge --> VM
+    VM --> Filter[룰셋·예외·검색·분류 필터]
+    Filter --> List[결함 목록 + 코드 뷰어]
+    Filter --> Summary[RuleSummaryBuilder → RuleIssueGroup / RuleIssueOccurrence]
+    Summary --> UI
 ```
 
----
+## 분석 흐름
 
-## 2. 정적 분석 파이프라인 상세 흐름
+### 1. 입력과 포함 경로 준비
 
-사용자가 **[분석 시작]** 버튼을 클릭하면 `AnalysisOrchestrator`는 다음 4단계로 분석을 수행한다.
+`MainViewModel`이 설정·트리의 입력 스냅샷을 만들어 백그라운드에서 `CppcheckRunner.RunAnalysisAsync`를 실행합니다. 검사 대상 파일을 보고 위치 집합으로 유지하고 `.c`/`.cpp`를 우선 실행 입력으로 선택합니다. 소스가 없으면 대상 파일을 직접 입력합니다.
 
-### 단계 1: 실행 인자 구성 (`CppcheckRunner`)
-1. **타겟 프리셋 적용**:
-   - 선택된 타겟의 플랫폼 XML 파일(`--platform=data/targets/ti_c6000_eabi.xml` 등) 지정
-   - 타겟 전용 컴파일러 키워드 치환 매크로(`-Dcregister=`, `-Dinterrupt=`, `-Dfar=` 등) 자동 추가
-   - C 표준(`--std=c99` 등) 및 `--force` (또는 지정된 매크로 조건) 설정
-2. **검사 대상 및 비대상 분리**:
-   - 프로젝트에 임포트된 폴더 구조에서 헤더가 위치한 폴더들을 추출하여 `-I <폴더경로>`로 자동 등록 (비대상 폴더의 헤더도 참조 가능하도록 지원)
-   - **검사 대상(Target = true)**으로 체크된 `.c` 파일들만 분석 입력 파일로 전달
-3. **Cppcheck 실행 옵션**:
-   - `--xml --xml-version=2`: 기본 Cppcheck 엔진의 결함 및 `missingInclude` 정보 수집
-   - `--dump`: 각 검사 대상 파일에 대해 토큰, AST, 심볼 테이블, 타입 정보(`ValueType`)가 담긴 `.dump` XML 파일 생성 (분석 완료 후 임시 폴더 또는 정리 처리)
+`IncludePathResolver`는 대상·참조 트리의 디렉터리와 파일을 수집하고, 포함 경로의 상위 디렉터리 추정 및 임시 포워딩 헤더로 경로 차이를 보완합니다. 참조 파일을 `-i`로 제외하지 않으며, 파싱된 진단 중 대상 파일에 속한 위치를 보고합니다.
 
-### 단계 2: 라인별 검사 완료 / 미검사(Skipped) 줄 판별 (`DumpFileParser`)
-코드 뷰어에서 각 줄이 실제로 분석되었는지 판별하기 위해 원본 소스 파일과 `.dump` 파일의 `<rawtokens>` 및 `<tokenlist>`(전처리 후 토큰)를 비교한다.
+### 2. Cppcheck 실행과 산출물 보호
 
-1. **비코드 라인 분류 (Neutral / Blank & Comment)**:
-   - 공백 줄, 주석(`//`, `/* ... */`)만 있는 줄, 전처리 지시문(`#include`, `#define`, `#ifdef`, `#endif` 등) 자체 줄은 배경색을 칠하지 않는 기본 줄로 분류한다.
-2. **검사 완료 라인 (Analyzed Line)**:
-   - 전처리 후 실제 분석기에 전달된 `<tokenlist>` 내의 `<token>` 들 중 해당 파일(`fileIndex`)에 속하는 토큰들의 `linenr`(줄 번호) 집합을 추출한다.
-   - 구문이나 수식이 여러 줄에 걸친 경우 AST 토큰 범위를 포함하여 **검사 완료(Analyzed)** 상태로 표시한다.
-3. **미검사 라인 (Skipped Line)**:
-   - 원본 파일(또는 `<rawtokens>`)에는 실제 C 코드 토큰이 존재하지만, `#ifdef` / `#if 0` 조건 불충족이나 매크로 미정의 등으로 인해 전처리 후 `<tokenlist>`에서 완전히 사라진 줄 번호를 추출하여 **미검사(Skipped)** 상태로 표시한다.
+공통 옵션은 `--enable=all --inconclusive --check-level=exhaustive --xml --dump --std=<선택값>`입니다. 존재하는 플랫폼 XML을 `--platform=`으로 지정하고 프리셋·사용자 매크로와 `-I` 경로를 추가합니다. UI 옵션에 따라 `--force`를 추가합니다. 현재 코드에는 `--xml-version=2` 인자가 없습니다.
 
-### 단계 3: C# 네이티브 정밀 타입 및 MISRA C 2012 분석 (`MisraAndTypeAnalyzer`)
-Python 및 외부 `misra.py`를 호출하지 않고, `DumpFileParser`가 파싱한 메모리 내 AST/Token/Variable/Scope 모델을 순회하며 C#에서 직접 검사를 수행한다.
+`DumpFileGuard`가 기존 `<소스>.dump`와 `<소스>.ctu-info`를 백업한 뒤 실행합니다. 새 dump는 소스 옆에 생성되므로 그 디렉터리에 쓰기 권한이 필요합니다. 종료·취소·오류 시 새 산출물을 정리하고 기존 파일을 복원합니다. 복원 실패 시 백업이 남을 수 있습니다.
 
-#### 3.1 암묵적 축소 변환 (`ImplicitNarrowingConversion`) 검출 알고리즘
-1. **대입 및 초기화 검사 (`=` 토큰)**:
-   - 이항 연산자 `=` 토큰에서 좌변(`astOperand1`)과 우변(`astOperand2`)의 `ValueType`을 비교한다.
-   - 우변 최상위 노드가 명시적 타입 캐스트(`isCast == true`)가 아닌 경우:
-     - 타겟 플랫폼 기준 좌변의 비트 크기(`LHS.Bits`) < 우변의 비트 크기(`RHS.Bits`)이면 축소 변환으로 검출한다. (단, 우변이 정수 상수 리터럴이고 좌변 타입의 표현 범위 내에 안전하게 들어가는 경우는 예외 처리 가능)
-     - 우변이 실수형(`float`/`double`)이고 좌변이 정수형이거나, 우변이 `double`(64-bit)이고 좌변이 `float`(32-bit)인 경우 검출한다.
-2. **함수 인자 전달 검사 (`(` 함수 호출 토큰)**:
-   - 호출 대상 함수의 선언(`Function` 심볼)에서 각 매개변수(`Argument` 변수)의 타입/비트 크기와 실제 전달된 인자 표현식의 `ValueType`을 비교하여 암묵적 축소 변환 여부를 검출한다.
-3. **함수 반환문 검사 (`return` 토큰)**:
-   - 현재 속한 함수(`Scope` → `Function`)의 반환 타입과 `return` 피연산자의 `ValueType`을 비교하여 암묵적 축소 변환 여부를 검출한다.
+첫 실행의 dump에 나타나지 않은 대상 `.h`/`.hpp`는 두 번째 실행에서 직접 분석합니다. 소스 문맥이 없는 직접 헤더 분석의 제한을 노트로 알립니다.
 
-#### 3.2 C# 변환 MISRA C 2012 규칙 검사기
-`misra.py`의 핵심 규칙 검사 로직을 C# 메서드로 모듈화하여 수행한다:
-- **형변환 및 타입 (Rule 10.1 ~ 10.8)**: 부적절한 피연산자 타입, 암묵적 축소/부호 변환, 복합 수식 형변환
-- **포인터 변환 (Rule 11.1 ~ 11.9)**: 포인터-정수 변환, 서로 다른 객체 포인터 간 변환, `const`/`volatile` 한정자 제거 캐스트
-- **연산자 및 수식 (Rule 12.1 ~ 13.6)**: 연산자 우선순위 괄호 명시, 시프트 연산 범위(`Rule 12.2`), 조건문 내 대입 연산자 사용(`Rule 13.4`), `sizeof` 내 부작용(`Rule 13.6`)
-- **제어 흐름 (Rule 14.1 ~ 16.7)**: 실수형 루프 카운터 금지, 조건식 boolean 타입, `goto` 사용(`Rule 15.1`), 함수 단일 반환(`Rule 15.5`), `switch` 문 `default`/`break` 구조(`Rule 16.x`)
-- **선언 및 함수 (Rule 8.x, 9.x, 17.x)**: 암묵적 타입 선언 금지, 배열 크기 명시, 함수 반환값 무시 금지(`Rule 17.7`), 재귀 호출 금지(`Rule 17.2`)
-- **전처리기 및 표준 라이브러리 (Rule 20.x, 21.x)**: `#undef` 사용 제한, 매크로 매개변수 괄호 누락, 동적 메모리 할당(`malloc`/`free`, `Rule 21.3`) 금지 등
+### 3. XML 및 dump 해석
 
-### 단계 4: Clang-Tidy 심층 분석 및 누락 헤더 자동 더미(Stub) 처리 (`ClangTidyRunner`)
-1. **누락 헤더 자동 더미 생성**:
-   - 대상 소스 및 헤더의 `#include "..."` 구문을 스캔하여 현재 프로젝트의 참조 경로(`-I`)에 존재하지 않는 헤더 파일이 있으면 임시 폴더(`%TEMP%/jeoncheck_stubs_*`)에 빈 헤더 파일을 자동 생성한다.
-   - 이를 통해 외부 벤더 SDK 헤더 일부가 없더라도 `clang-tidy`가 `fatal error: file not found`로 중단되지 않고 끝까지 분석을 수행한다.
-2. **타겟 아키텍처 연동 실행**:
-   - 선택된 타겟 프리셋의 `clangTarget`(`armv7r-none-eabi`, `aarch64-none-elf`, `riscv64-unknown-elf`, `powerpc-none-eabihf`, `powerpc64-none-elf`)과 내장 표준 C 헤더(`tools/clang-tidy/include`)를 지정하여 `bugprone-*`, `cert-*`, `clang-analyzer-*` 검사를 수행한다.
+- XML 진단에서 파일·줄·열·ID·메시지를 읽고 등록 규칙의 한글 해설을 연결합니다.
+- 헤더 누락과 분석 범위 제한은 노트로 분리합니다. 유효한 결과 XML을 해석할 수 없으면 예외로 처리하여 0건으로 오인하지 않게 합니다.
+- `DumpFileParser`는 플랫폼 폭, 토큰 링크·AST, 변수·스코프·함수, 지시문을 모델로 만듭니다.
+- 전처리 후 `tokenlist`의 파일·줄을 분석 줄 집합으로 수집하고, `rawtokens`의 코드 줄 중 분석 집합에 없는 줄을 미검사로 분류합니다. 토큰 파일 경로는 `file`, raw token 파일 인덱스는 `fileIndex`를 사용합니다.
+- 여러 설정·번역 단위의 분석 줄은 합집합으로 병합합니다. 토큰 기반 커버리지는 모든 규칙의 판정 성공이나 완전한 분기 커버리지의 증명이 아닙니다.
 
-### 단계 5: 결과 병합, 룰셋 필터링 및 한글 해설 매핑
-1. Cppcheck XML 결과, `MisraAndTypeAnalyzer` 결과, `ClangTidyRunner` 결과를 통합하고, 같은 위치(규칙 + 파일 + 줄 + 열)에 반복 보고된 진단만 제거한다. 가능한 많은 결함을 보여 주기 위해 같은 줄의 서로 다른 결함이나 도구별로 따로 검출된 결과는 모두 표시한다.
-2. `missingInclude`, `missingIncludeSystem` 등 환경/참조 관련 알림은 **[노트 / 누락 파일 안내 (Info)]** 탭으로 분리한다.
-3. 사용자가 현재 프로젝트의 **Ruleset**에서 활성화(ON)해 둔 규칙 ID에 해당하는 항목만 필터링하고 `data/rules_ko.json`의 한글 상세 해설을 연결한다.
+### 4. C# 타입 및 MISRA 검사
+
+`EssentialTypeResolver`는 가능한 식에 대해 MISRA 필수 타입 범주·비트 폭을 계산합니다. 대입·인자·반환의 변환은 정수 승격 후 타입만으로 판정하지 않으며, 정수 상수식의 표현 가능 범위 예외를 처리합니다. 캐스트 자체와 캐스트 결과에서 최종 대상까지의 변환은 별도로 검사합니다. 해석할 수 없는 정보는 일부 검사 생략으로 이어집니다.
+
+### C# 분석기의 구현 범위
+
+| 경로 | 규칙 ID |
+| --- | --- |
+| 선언 | 8.2 |
+| 필수 타입 | 10.1, 10.3, 10.4 |
+| 포인터 변환 | 11.3, 11.4, 11.5, 11.8 |
+| 수식 | 12.1, 12.2, 13.4, 13.5, 13.6 |
+| 제어 흐름 | 14.1, 14.4, 15.1, 15.6, 16.3, 16.4 |
+| 함수 | 17.2, 17.7, 17.8 |
+| 전처리기·라이브러리 | 20.5, 21.3, 21.6 |
+
+위 25개는 `MisraAndTypeAnalyzer`가 직접 보고하는 규칙이며, 각 규칙 전체의 완전한 구현을 뜻하지 않습니다. 9.1은 `CppcheckRunner`에서 `uninitvar`, `uninitdata`, `uninitStructMember`를 매핑합니다. 자동 변수에 대한 규정과 동적 메모리 진단의 범위를 동일시하지 않도록 실제 진단 문맥을 검토해야 합니다.
+
+별도 자체 ID는 `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`입니다. Python addon 파일이 저장소에 있어도 런타임에 실행하지 않으며, Python `misra.py` 전체와 결과가 동일하다고 가정하지 않습니다.
+
+17.2는 설정 단위 호출 그래프에서 직접·간접 재귀를 찾고 보고 위치만 대상 파일로 제한합니다. 별도 번역 단위 사이의 전체 호출 그래프를 구축하지 않습니다. 17.8은 모든 대입 연산 및 증감을 검사합니다. 12.1은 현재 구현의 비트·비교 연산 혼합 경로에서 실제 토큰 사이의 괄호를 확인하며 모든 연산자 조합을 검사하는 것은 아닙니다.
+
+### 5. 선택적 Clang-Tidy 분석
+
+실행 파일이 존재하고 옵션이 켜진 경우 `-checks=-*,bugprone-*,cert-*,clang-analyzer-*`, `-xc`, 선택한 `-std`, `--target`, `-nostdinc`를 전달합니다. 내장 간이 표준 헤더, 프로젝트 포함 경로, 임시 stub 경로, 매크로도 추가합니다. `--force`는 전달하지 않습니다.
+
+누락 헤더 stub은 정적으로 찾을 수 있는 include를 대상으로 하며, 절대 경로나 임시 루트 밖으로 벗어나는 경로는 생성하지 않습니다. 빈 헤더로 선언·타입·매크로를 복원할 수 없고 매크로 기반 include 등도 해결하지 못할 수 있습니다. 비정상 종료는 노트로 안내합니다.
+
+TI DSP에는 `armv7r-none-eabi` 대체 트리플을 사용합니다. Cppcheck의 COFF 40비트 `long`을 Clang-Tidy에 동일하게 구현하는 경로는 없습니다. 타겟 트리플·간이 헤더에 따른 모델 차이를 실제 SDK·컴파일러 검증과 구분해야 합니다.
+
+### 6. 병합과 표시
+
+진단 중복 키는 **규칙 ID + 정규화된 파일 경로 + 줄 + 열**입니다. 같은 줄의 다른 규칙·열은 유지하며, 서로 다른 도구의 동일 규칙·위치 결과는 중복 제거될 수 있습니다. 예외 키는 **규칙 ID + 파일 + 줄**이므로 열 단위 중복 키보다 범위가 넓습니다.
+
+Clang-Tidy 축소 변환은 `implicitNarrowing`으로, 실수 루프 카운터 진단은 `cert-flp30-c`로 표시합니다. 여러 별칭이 붙은 진단은 활성 등록 ID를 우선하며 등록 별칭이 모두 OFF이면 보고하지 않습니다. DB 등록 규칙의 심각도는 앱 DB 분류입니다. 미등록 런타임 규칙은 Cppcheck/Clang-Tidy의 현재 진단 심각도를 사용하며, 이전 실행에서 발견한 같은 ID의 심각도로 새 결과를 덮지 않습니다.
+
+`RefreshFilteredDefects`가 ON 규칙·예외·분류·검색을 적용한 후 같은 집합에서 결함 목록, 코드 줄 표시, 규칙별 요약을 갱신합니다. `RuleSummaryBuilder`는 규칙별 건수를 내림차순으로 집계하고 파일·줄·열 순으로 원본 진단과 코드 미리보기를 연결합니다. 미리보기는 갱신 시 현재 파일을 읽으며 요약은 프로젝트 파일에 저장하지 않습니다.
+
+미등록 진단은 `RuleInfo.CreateUnregistered`가 공통 한글 안내를 생성하고, `RefreshFilteredDefects`가 발견한 ID를 런타임 `AllRules`에 기본 ON으로 추가합니다. 이 등록을 필터 적용보다 먼저 수행하여 결함 목록과 요약에 표시합니다. 개별 원문은 각 `AnalysisIssue.Message`에 유지하고 공통 규칙 해설에 첫 원문을 고정하지 않습니다.
+
+미등록 규칙도 룰셋 ON/OFF 및 프로젝트 저장 ID 목록을 사용합니다. 프로젝트 로드 시 DB에 없는 저장 ID를 임시 규칙으로 복원하므로 OFF 선택이 다음 분석에도 적용됩니다. 이 과정은 `rules_ko.json`을 쓰지 않습니다. DB에 새로 한글 등록한 ID는 다음 앱 초기화 시 정식 설명을 사용합니다.

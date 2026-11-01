@@ -219,14 +219,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
         foreach (var r in rules)
         {
-            r.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(RuleInfo.IsEnabled))
-                {
-                    OnPropertyChanged(nameof(RulesetButtonText));
-                }
-            };
-            AllRules.Add(r);
+            AddRule(r);
         }
 
         // 초기 샘플 코드가 존재하면 바로 테스트할 수 있도록 로드
@@ -656,6 +649,19 @@ public class MainViewModel : INotifyPropertyChanged
 
     public void RefreshFilteredDefects()
     {
+        // 엔진이 보고한 미등록 ID도 기본 ON으로 목록에 추가해 필터에서 유실되지 않게 한다.
+        var knownRules = AllRules.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
+        foreach (var issue in _allRawDefects)
+        {
+            if (!knownRules.TryGetValue(issue.RuleId, out var rule))
+            {
+                rule = issue.RuleDetails ?? RuleInfo.CreateUnregistered(issue.RuleId, issue.Severity);
+                AddRule(rule);
+                knownRules.Add(rule.Id, rule);
+            }
+            issue.RuleDetails = rule;
+        }
+
         var suppressedKeys = SuppressedIssues.Select(s => s.SuppressionKey).ToHashSet();
         var enabledRuleIds = AllRules.Where(r => r.IsEnabled).Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -887,6 +893,13 @@ public class MainViewModel : INotifyPropertyChanged
         ForceAllIfdefConfigs = model.ForceAllIfdefConfigs;
         EnableClangTidy = model.EnableClangTidy;
 
+        // DB에 없는 ID도 프로젝트에 저장된 ON/OFF 선택을 재분석 전에 복원한다.
+        var savedIds = model.EnabledRuleIds.Concat(model.DisabledRuleIds ?? Enumerable.Empty<string>())
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase);
+        var knownIds = AllRules.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string id in savedIds)
+            if (knownIds.Add(id)) AddRule(RuleInfo.CreateUnregistered(id));
+
         if (model.DisabledRuleIds != null)
         {
             // 저장 당시 켜짐/꺼짐 목록에 있는 규칙은 그대로 복원하고,
@@ -1016,6 +1029,18 @@ public class MainViewModel : INotifyPropertyChanged
     private static int CountFiles(IEnumerable<SourceTreeNode> roots)
     {
         return roots.SelectMany(r => r.EnumerateFiles()).Count();
+    }
+
+    private void AddRule(RuleInfo rule)
+    {
+        rule.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RuleInfo.IsEnabled))
+                OnPropertyChanged(nameof(RulesetButtonText));
+        };
+        AllRules.Add(rule);
+        if (!string.IsNullOrWhiteSpace(rule.Category) && !DefectCategoryFilters.Contains(rule.Category))
+            DefectCategoryFilters.Add(rule.Category);
     }
 
     public void NotifyCountsChanged()

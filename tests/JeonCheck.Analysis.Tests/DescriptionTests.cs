@@ -88,7 +88,7 @@ static class DescriptionTests
         }
     }
 
-    private static AnalysisRunResult ParseCppcheck(string id, string severity, string message)
+    internal static AnalysisRunResult ParseCppcheck(string id, string severity, string message, Dictionary<string, RuleInfo>? rules = null)
     {
         const string file = "fixture.c";
         var result = new AnalysisRunResult();
@@ -97,7 +97,7 @@ static class DescriptionTests
         var method = typeof(CppcheckRunner).GetMethod("ParseCppcheckXmlOutput", BindingFlags.NonPublic | BindingFlags.Static)!;
         string xml = $"<?xml version=\"1.0\"?><results><errors><error id=\"{id}\" severity=\"{severity}\" msg=\"{message}\"><location file=\"{file}\" line=\"1\" column=\"2\"/></error></errors></results>";
         Require((bool)method.Invoke(null, new object[] { xml,
-            new HashSet<string> { AnalysisIssue.NormalizePath(file) }, new Dictionary<string, RuleInfo>(), result, keys })!,
+            new HashSet<string> { AnalysisIssue.NormalizePath(file) }, rules ?? new Dictionary<string, RuleInfo>(), result, keys })!,
             "XML 파싱 실패");
         return result;
     }
