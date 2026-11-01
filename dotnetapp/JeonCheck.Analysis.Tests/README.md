@@ -12,15 +12,27 @@ dotnet run --project dotnetapp/JeonCheck.Analysis.Tests
 
 현재 검사 범위는 다음과 같습니다.
 
-- 합성 AST를 실제 분석기에 전달하여 캐스트 이후 변환, 부호 비교, 포인터 변환, switch, 복합 대입, 시프트, 입출력 함수 및 재귀의 검출·비검출 사례 확인
-- dump XML 파서부터 분석기까지의 일부 연결 경로
+- 합성 AST를 자체 타입 검사기에 전달하여 캐스트 이후 변환, 부호 변환 상수 예외, 규칙 OFF의 검출·비검출 사례 확인
+- dump XML 파서부터 자체 타입 검사기까지의 연결 경로
+- MISRA 검사기(`misra.py` 이식)의 dump 해석(구성 뒤 rawtokens 포함), 같은 위치 중복 제거, 원본처럼 중단되는 dump의 부분 결과, 원본 Python 동작(부분 문자열 `in`, `None` 서식, errno 함수 목록)
 - 한글 설명 DB의 중복 ID·필수 필드, 예시 미등록 안내, MISRA 의무/프로젝트 정책 표시
 - runner의 헤더 누락 노트 및 미등록 진단의 XML/텍스트 파싱 → ViewModel 필터 → 목록·요약·상세 모델 연결
 - 발견된 규칙의 기본 ON, 검색·분류·예외/복원·OFF, 프로젝트 선택 저장·재로드·재분석 및 발생 위치별 원문·심각도 보존
 - 규칙별 집계·정렬·코드 미리보기와 검색·분류·OFF·예외/복원·프로젝트 초기화 연동
 - 같은 줄의 여러 진단에서 원본 상세 대상 보존 및 존재하는 그룹의 접기 상태 유지
 
-합성 AST·XML은 실제 Windows 도구가 모든 C 소스에서 같은 데이터를 생성한다는 보장이 아닙니다. Windows용 Cppcheck/Clang-Tidy 실행, GUI 조작, Python addon 전체와의 동등성 검증은 자동 검사에 포함하지 않습니다.
+합성 AST·XML은 실제 Windows 도구가 모든 C 소스에서 같은 데이터를 생성한다는 보장이 아닙니다. Windows용 Cppcheck/Clang-Tidy 실행, GUI 조작은 자동 검사에 포함하지 않습니다.
+
+## MISRA 검사기와 원본 misra.py의 차분 검증 (Windows)
+
+C# MISRA 검사기는 원본 `misra.py`와 같은 결과를 내야 합니다. 원본과의 일치는 실제 Cppcheck dump로 비교합니다. Python 3과 저장소 내장 Cppcheck가 필요합니다.
+
+```sh
+tools/cppcheck/cppcheck.exe --dump <C 소스 파일 또는 폴더>
+python dotnetapp/JeonCheck.Analysis.Tests/MisraParity/compare_misra.py <dump가 있는 폴더>
+```
+
+원본과 다른 위반이 하나라도 있으면 목록을 출력하고 종료 코드 1을 반환합니다. Cppcheck를 다른 버전으로 바꾸면 `python dotnetapp/JeonCheck.Analysis.Tests/MisraParity/gen_misra_tables.py`로 식별자 표를 다시 생성하고, 새 `misra.py`의 변경 내용을 C#에 반영한 뒤 이 비교를 다시 실행합니다.
 
 ## 빌드
 

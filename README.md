@@ -11,7 +11,7 @@ Ubuntu에서는 같은 데이터(`data/`, `samples/`)를 사용하는 **PySide6 
 - 폴더·파일을 검사 대상과 비대상/참조 트리로 나누고, 선택 항목을 이동·제거합니다. 폴더 스캔은 `.c`, `.h`, `.cpp`, `.hpp`를 포함하지만 주된 분석 대상은 C이며 Clang-Tidy에는 `-xc`를 전달합니다.
 - C89/C99/C11/C17, 사용자 매크로, Cppcheck `--force`, Clang-Tidy 사용 여부를 설정합니다.
 - TI DSP C6746/C6655/C6672/C6678 EABI, C6746/C6678 COFF, NXP T1024 32/64비트, PolarFire RV64, Versal AP/RP의 **11개 프리셋**을 제공합니다.
-- Cppcheck `.dump`를 C#에서 해석하여 축소·부호 변환과 MISRA 일부 규칙을 검사합니다. Python addon을 실행하지 않습니다. 직접 보고하는 MISRA 규칙은 25개이며, 9.1은 Cppcheck 결과에서 별도로 매핑합니다. 정확한 목록과 제한은 [아키텍처 문서](doc/02_architecture.md)를 참고하십시오.
+- Cppcheck `.dump`를 C#에서 해석하여 MISRA 규칙과 축소·부호 변환을 검사합니다. MISRA 검사기는 Cppcheck 2.22 `misra.py`를 C#으로 옮긴 것으로, Python 없이 원본과 같은 규칙·위치를 보고합니다. 9.1은 Cppcheck 결과에서 별도로 매핑합니다. 범위와 검증 방법은 [아키텍처 문서](doc/02_architecture.md)를 참고하십시오.
 - 코드 줄에 오류·경고·분석 토큰 존재·미검사·예외 상태를 표시합니다. 같은 줄의 여러 진단은 `[규칙ID +N]` 배지와 전체 툴팁으로 확인합니다.
 - 결과는 **결함 목록 / 규칙별 요약 / 노트 / 예외 항목** 탭으로 나눕니다. 규칙별 요약은 발생 건수 순으로 규칙을 묶고, 펼치면 발생 위치와 현재 파일의 코드 한 줄을 표시합니다. 항목 선택 시 코드와 상세 설명으로 이동합니다.
 - 검색·분류 필터와 예외 처리 상태는 결함 목록과 규칙별 요약에 함께 반영됩니다.
@@ -35,7 +35,7 @@ DB에 없는 ID도 원문과 개별 한글 해설 미등록 안내를 표시하�
 | --- | --- | --- | --- |
 | 앱 위치 | `dotnetapp/` | `pyapp/` | `pyapp/` |
 | Cppcheck·Clang-Tidy | 내장 `tools/` (Cppcheck 2.22) | 내장 `tools/` (Cppcheck 2.22) | apt 패키지 (Ubuntu 26.04: Cppcheck 2.19, Clang-Tidy 21) |
-| MISRA 검사 | C# 분석기 25개 규칙 + 9.1 | `misra.py` 131개 규칙 + 9.1 | `misra.py` 131개 규칙 + 9.1 |
+| MISRA 검사 | `misra.py` C# 이식 (131개 규칙) + 9.1 | `misra.py` 131개 규칙 + 9.1 | `misra.py` 131개 규칙 + 9.1 |
 | 확인 상태 | 기본 앱. Windows 수동 검증 절차는 [테스트 안내](dotnetapp/JeonCheck.Analysis.Tests/README.md) 참고 | **Windows 실행 미검증** (Linux에서 도구 선택·명령 구성만 자동 테스트) | Ubuntu 26.04에서 실행·테스트 확인 |
 
 ### Windows .NET (WPF)
@@ -106,7 +106,7 @@ cd pyapp
 
 - **도구 경로 지정:** 도구는 환경변수 → (Windows) 저장소 내장 도구 → PATH 순으로 찾습니다. `JEONCHECK_CPPCHECK`, `JEONCHECK_CLANG_TIDY`, `JEONCHECK_ADDON_DIR`(`misra.py`가 있는 addon 폴더) 환경변수로 바꿀 수 있습니다. addon은 사용하는 Cppcheck와 같은 버전이어야 합니다.
 - **프로젝트 파일:** `*.jcproj`는 WPF 앱과 같은 형식이며 서로 열 수 있습니다.
-- **MISRA 범위:** WPF 앱은 C#으로 옮긴 25개 규칙만 보고하지만, Python 앱은 `misra.py`가 검출하는 모든 규칙을 보고하므로 진단이 더 많을 수 있습니다. 131개 규칙 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. `misra.py`가 규칙 원문 없이 출력하므로 MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, 위치별 상세 원문은 없습니다.
+- **MISRA 범위:** WPF 앱(C# 이식)과 Python 앱(원본 실행) 모두 Cppcheck 2.22 `misra.py`와 같은 결과를 보고합니다. 자체 타입 검사(`implicitNarrowing` 등)는 앱별 구현이라 일부 다를 수 있습니다. 131개 규칙 모두 `rules_ko.json`에 한글 해설이 등록되어 있으며 룰셋에서 끌 수 있습니다. 이후 버전의 `misra.py`가 새 규칙을 보고하면 미등록 진단으로 표시합니다. `misra.py`가 규칙 원문 없이 출력하므로 MISRA 진단의 메시지는 규칙 요약과 규칙 번호이며, 위치별 상세 원문은 없습니다.
 - **도구 버전:** Linux는 apt 도구(Ubuntu 26.04: Cppcheck 2.19)를 사용하므로 Windows 내장 도구(Cppcheck 2.22)와 진단이 다를 수 있습니다.
 - **자체 검사:** `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`는 C# 검사를 Python으로 옮긴 것이며, 필수 타입은 `misra.py`의 `getEssentialType()`으로 계산합니다.
 

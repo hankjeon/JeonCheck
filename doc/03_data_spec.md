@@ -69,7 +69,7 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
 
 ## 2. 한글 규칙 해설 데이터베이스 (`data/rules_ko.json`)
 
-현재 등록된 477개 진단 ID의 한글 설명과 기본 활성화 여부를 정의한다. 자체 타입 변환, MISRA 132개 ID(misra.py가 보고하는 131개와 Cppcheck 결과를 매핑하는 9.1. WPF 앱의 C# 분석기는 그중 25개와 9.1만 보고), Cppcheck 및 Clang-Tidy/CERT/Clang Analyzer ID를 포함한다. DB 등록은 엔진 구현이나 해당 버전의 체커 지원을 보장하지 않는다.
+현재 등록된 477개 진단 ID의 한글 설명과 기본 활성화 여부를 정의한다. 자체 타입 변환, MISRA 132개 ID(misra.py가 보고하는 131개와 Cppcheck 결과를 매핑하는 9.1. 두 앱 모두 misra.py 기준으로 보고), Cppcheck 및 Clang-Tidy/CERT/Clang Analyzer ID를 포함한다. DB 등록은 엔진 구현이나 해당 버전의 체커 지원을 보장하지 않는다.
 
 ```json
 {
@@ -90,7 +90,7 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
 }
 ```
 
-- **식별자**: `id`는 도구 ID 또는 앱의 자체 ID이며, 등록 규칙 간 중복 없이 사용한다. 엔진의 현재 구현 범위는 [아키텍처 문서](02_architecture.md#c-분석기의-구현-범위)를 따른다.
+- **식별자**: `id`는 도구 ID 또는 앱의 자체 ID이며, 등록 규칙 간 중복 없이 사용한다. 엔진의 현재 구현 범위는 [아키텍처 문서](02_architecture.md#4-c-misra-검사기)를 따른다.
 - **설명**: `title`, `summary`, `description`은 한글로 제공한다. 외부 엔진의 원문 진단과 표준 ID는 그대로 함께 표시할 수 있다. 파일은 프로그램 초기화 시 읽으며 실행 중 자동 재로드하지 않는다.
 - **심각도와 정책**: `severity`는 앱의 기본 Error/Warning/Style 분류다. MISRA ID의 `obligation`은 해당 규칙의 의무 수준이고, 나머지 ID의 값은 프로젝트 검토 정책으로 표시한다. 저장된 `Critical` 정책은 UI에서 `우선 검토`로 표현하며 규칙의 공식 의무 등급으로 취급하지 않는다. `ObligationDisplay`, `SeverityDisplay` 같은 표시용 속성은 JSON에 저장하지 않는다. DB 미등록 상태를 뜻하는 `IsUnregistered`도 런타임 전용으로 JSON에 저장하지 않는다.
 - **기본값**: `defaultEnabled`는 초기 활성화 여부다. 규칙 창의 필수/우선 검토 선택은 저장된 정책 값을 기준으로 동작하며, 심각도 열로 자동 대체하지 않는다.

@@ -2,7 +2,21 @@ using JeonCheck.Models;
 using JeonCheck.Services;
 
 // 실행: dotnet run --project tests/JeonCheck.Analysis.Tests
-// 실패하면 종료 코드 1을 반환한다. 최소 AST로 규칙의 양성/음성 사례를 검증한다.
+// 실패하면 종료 코드 1을 반환한다. 최소 AST로 자체 타입 검사의 양성/음성 사례를 검증한다.
+// MISRA 검사기(원본 misra.py 이식) 검증은 MisraCheckerTests.cs에 있다.
+// 차분 검증 모드: MisraParity/compare_misra.py가 호출한다. 폴더의 모든 .dump를 MisraChecker로 검사해 JSON으로 저장한다.
+if (args.Length == 3 && args[0] == "--misra-json")
+{
+    var output = new Dictionary<string, List<object?[]>>();
+    foreach (var dump in Directory.GetFiles(args[1], "*.dump", SearchOption.AllDirectories))
+    {
+        var r = JeonCheck.Services.Misra.MisraChecker.CheckDump(dump);
+        output[Path.GetRelativePath(args[1], dump)] = r.Violations.Select(v => new object?[] { v.RuleId, v.File, v.Line, v.Column }).ToList();
+    }
+    File.WriteAllText(args[2], System.Text.Json.JsonSerializer.Serialize(output));
+    return 0;
+}
+
 int passed = 0, failed = 0;
 void Test(string name, Action action)
 {
@@ -33,162 +47,28 @@ foreach (string castType in new[] { "int", "char" })
             var call = f.Token("("); call.AstOperand1 = name; call.AstOperand2 = cast;
             f.Unit.FunctionById["consume"] = new() { Args = new() { new() { NameToken = destination } } };
         }
-        f.Expect("10.3", castType == "int" ? 1 : 0);
         f.Expect("implicitNarrowing", castType == "int" ? 1 : 0);
     });
 }
 
-foreach (string op in new[] { "<", "+", "&", "|", "^", "+=", "-=", ":" })
-foreach (string sign in new[] { "signed", "unsigned" })
-    Test($"10.4: {op}, {sign} 상수", () =>
+foreach (var (target, value, expected) in new[] { ("unsigned", "1", 0), ("unsigned", "-1", 1), ("signed", "1", 0) })
+    Test($"부호 변환: {target} ← 상수 {value}", () =>
     {
+        // 음수가 아닌 정수 상수를 부호 없는 변수에 대입하는 것은 허용한다.
         var f = new Fixture();
-        var expr = f.Binary(op, f.Value("u", "int", "unsigned"), f.Integer("1", sign));
-        expr.IsComparisonOp = op == "<";
-        f.Expect("10.4", sign == "signed" ? 1 : 0);
-    });
-
-foreach (var (target, source, targetDepth, sourceDepth, expected) in new[]
-{
-    ("int", "void", 1, 1, 1), ("void", "int", 1, 1, 0),
-    ("int", "int", 1, 1, 0), ("int", "void", 2, 1, 0)
-})
-    Test($"11.5: {source}* → {target}* ({targetDepth}/{sourceDepth})", () =>
-    {
-        var f = new Fixture();
-        var lhs = f.Value("lhs", target); lhs.ValuePointer = targetDepth;
-        var rhs = f.Value("rhs", source); rhs.ValuePointer = sourceDepth;
+        var lhs = f.Value("u", "int", target);
+        var rhs = f.Integer(value);
+        if (value.StartsWith('-')) { rhs.IsIntLiteral = false; rhs.Str = "-"; rhs.AstOperand1 = f.Integer("1"); }
         f.Binary("=", lhs, rhs).IsAssignmentOp = true;
-        f.Expect("11.5", expected);
+        f.Expect("implicitSignConversion", expected);
     });
 
-foreach (var (body, expected) in new[]
+Test("규칙 비활성화 시 자체 검사 미보고", () =>
 {
-    ("case 1 : return 1 ; default : break ;", 0),
-    ("case 1 : return func ( ) ; default : break ;", 0),
-    ("case 1 : { work ( ) ; break ; } default : break ;", 0),
-    ("case 1 : { { break ; } } default : break ;", 0),
-    ("case 1 : case 2 : break ; default : break ;", 0),
-    ("case 1 : work ( ) ; default : break ;", 1),
-    ("case 1 : if ( flag ) { break ; } default : break ;", 1),
-    ("case 1 : while ( flag ) { break ; } default : break ;", 1),
-    ("case 1 : switch ( x ) { default : break ; } default : break ;", 1),
-    ("case 1 : break ; default : work ( ) ;", 1),
-    ("case 1 : break ; work ( ) ; default : break ;", 1),
-    ("case 1 : if ( flag ) { break ; } break ; default : break ;", 0)
-})
-    Test($"16.3: {body}", () =>
-    {
-        var f = new Fixture(); var start = f.Token("{");
-        foreach (var spelling in body.Split(' ')) f.Token(spelling);
-        var end = f.Token("}");
-        f.Unit.ScopeById["switch"] = new() { Type = "Switch", BodyStartId = start.Id, BodyEndId = end.Id };
-        f.Expect("16.3", expected);
-        f.Expect("16.4", 0);
-    });
-
-foreach (string op in new[] { "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "++", "--" })
-foreach (string access in new[] { "Argument", "Local" })
-    Test($"17.8: {access} {op}", () =>
-    {
-        var f = new Fixture(); var value = f.Value("p"); value.Variable!.Access = access;
-        var token = f.Binary(op, value, f.Integer("2"));
-        token.IsAssignmentOp = op is not ("++" or "--");
-        f.Expect("17.8", access == "Argument" ? 1 : 0);
-    });
-
-foreach (var (leftSign, rightKind, expected) in new[]
-{
-    ("unsigned", "signed-variable", 1), ("unsigned", "unsigned-variable", 0),
-    ("unsigned", "signed-literal", 0), ("signed", "signed-literal", 1)
-})
-    Test($"10.1: {leftSign} << {rightKind}", () =>
-    {
-        var f = new Fixture(); var left = f.Value("left", "int", leftSign);
-        var right = rightKind.EndsWith("literal") ? f.Integer("1") :
-            f.Value("count", "int", rightKind.StartsWith("unsigned") ? "unsigned" : "signed");
-        f.Binary("<<", left, right);
-        f.Expect("10.1", expected);
-    });
-
-foreach (bool parenthesized in new[] { true, false })
-foreach (bool comparisonOnLeft in new[] { true, false })
-    Test($"12.1: 괄호={parenthesized}, 비교식 왼쪽={comparisonOnLeft}", () =>
-    {
-        var f = new Fixture(); DumpToken bitwise; DumpToken mask;
-        if (!comparisonOnLeft) { mask = f.Token("mask"); bitwise = f.Token("&"); }
-        else { bitwise = new(); mask = new(); }
-        if (parenthesized) f.Token("(");
-        var a = f.Token("a"); var comparison = f.Token("=="); var b = f.Token("b");
-        comparison.IsComparisonOp = true; comparison.AstOperand1 = a; comparison.AstOperand2 = b;
-        if (parenthesized) f.Token(")");
-        if (comparisonOnLeft) { bitwise = f.Token("&"); mask = f.Token("mask"); }
-        bitwise.AstOperand1 = comparisonOnLeft ? comparison : mask;
-        bitwise.AstOperand2 = comparisonOnLeft ? mask : comparison;
-        f.Expect("12.1", parenthesized ? 0 : 1);
-    });
-
-foreach (string name in new[] { "printf", "snprintf", "fread", "fwrite", "fseek", "fwprintf", "fgetwc", "swprintf_s", "malloc" })
-    Test($"21.6: {name}", () =>
-    {
-        var f = new Fixture(); f.Call("main", name);
-        f.Expect("21.6", name == "malloc" ? 0 : 1);
-    });
-
-Test("21.6: 이름이 같은 사용자 정의 함수", () =>
-{
-    var f = new Fixture(); f.Call("main", "remove");
-    f.Unit.FunctionById["remove"] = new() { Token = f.Token("remove") };
-    f.Expect("21.6", 0);
-});
-
-Test("21.6: 이름이 같은 함수 포인터", () =>
-{
-    var f = new Fixture(); var call = f.Call("main", "printf");
-    call.Variable = new() { IsPointer = true }; call.FunctionId = "";
-    f.Expect("21.6", 0);
-});
-
-Test("17.8: Cppcheck가 분리한 매개변수 초기화는 제외", () =>
-{
-    var f = new Fixture(); var arg = f.Value("arg"); arg.Variable!.Access = "Argument";
-    var eq = f.Binary("=", arg, f.Integer("1"));
-    eq.IsAssignmentOp = true; eq.IsSplittedVarDeclEq = true;
-    f.Expect("17.8", 0);
-});
-
-foreach (var (edges, expected) in new[]
-{
-    ("a:a", 1), ("a:b,b:a", 2), ("a:b,b:c,c:a", 3),
-    ("a:b,b:c", 0), ("a:b,b:c,c:b", 2), ("a:b,a:c,c:b", 0)
-})
-    Test($"17.2: {edges}", () =>
-    {
-        var f = new Fixture();
-        foreach (var edge in edges.Split(',')) { var pair = edge.Split(':'); f.Call(pair[0], pair[1]); }
-        f.Expect("17.2", expected);
-    });
-
-Test("17.2: 참조 파일을 경유하는 재귀와 보고 위치 필터", () =>
-{
-    var f = new Fixture(); f.Call("a", "b");
-    var referenceCall = f.Call("b", "a"); referenceCall.File = Path.GetFullPath("reference.c");
-    f.Expect("17.2", 1);
-});
-
-Test("17.2: 중첩 스코프의 호출", () =>
-{
-    var f = new Fixture(); var call = f.Call("a", "a");
-    f.Unit.ScopeById["if"] = new() { Type = "If", NestedInId = "scope-a" };
-    call.ScopeId = "if"; f.Expect("17.2", 1);
-});
-
-Test("규칙 비활성화 및 설정 간 중복 제거", () =>
-{
-    var f = new Fixture(); f.Call("a", "a");
-    f.Document.Configurations.Add(f.Unit);
-    f.Expect("17.2", 1);
-    f.Expect("17.2", 0, enabled: false);
+    var f = new Fixture();
+    f.Binary("=", f.Value("c", "char"), f.Value("i", "int")).IsAssignmentOp = true;
+    f.Expect("implicitNarrowing", 1);
+    f.Expect("implicitNarrowing", 0, enabled: false);
 });
 
 Test("dump XML 파싱 후 캐스트 대입 검사", () =>
@@ -210,8 +90,8 @@ Test("dump XML 파싱 후 캐스트 대입 검사", () =>
             </dump></dumps>
             """);
         var doc = new DumpFileParser().Parse(path);
-        var issues = new MisraAndTypeAnalyzer().Analyze(doc, new() { AnalysisIssue.NormalizePath("fixture.c") },
-            new() { ["misra-c2012-10.3"] = new() });
+        var issues = new TypeConversionAnalyzer().Analyze(doc, new() { AnalysisIssue.NormalizePath("fixture.c") },
+            new() { ["implicitNarrowing"] = new() });
         if (issues.Count != 1 || issues[0].Column != 5) throw new Exception("캐스트 대입 위치를 보고하지 않음");
     }
     finally { File.Delete(path); }
@@ -220,6 +100,7 @@ Test("dump XML 파싱 후 캐스트 대입 검사", () =>
 DescriptionTests.Run(Test);
 RuleSummaryTests.Run(Test);
 UnknownDiagnosticTests.Run(Test);
+MisraCheckerTests.Run(Test);
 
 Console.WriteLine($"회귀 테스트: 성공 {passed}, 실패 {failed}");
 return failed == 0 ? 0 : 1;
@@ -252,17 +133,10 @@ sealed class Fixture
     {
         var token = Token(op); token.AstOperand1 = left; token.AstOperand2 = right; return token;
     }
-    public DumpToken Call(string caller, string callee)
-    {
-        string scope = "scope-" + caller;
-        Unit.ScopeById[scope] = new() { Id = scope, Type = "Function", FunctionId = caller };
-        var name = Token(callee); name.ScopeId = scope; name.FunctionId = callee;
-        var call = Token("("); call.AstOperand1 = name; Token(")"); return name;
-    }
     public void Expect(string rule, int count, bool enabled = true)
     {
-        string id = rule.Contains('.') ? "misra-c2012-" + rule : rule;
-        var issues = new MisraAndTypeAnalyzer().Analyze(Document, new() { AnalysisIssue.NormalizePath(file) },
+        string id = rule;
+        var issues = new TypeConversionAnalyzer().Analyze(Document, new() { AnalysisIssue.NormalizePath(file) },
             new() { [id] = new() { Id = id, IsEnabled = enabled } });
         if (issues.Count != count) throw new Exception($"{id}: 기대 {count}, 실제 {issues.Count}");
     }

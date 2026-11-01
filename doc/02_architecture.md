@@ -13,9 +13,11 @@ flowchart TD
     Runner --> CPP[Cppcheck: XML 진단 + dump]
     CPP --> XML[Cppcheck XML 결과 파싱]
     CPP --> Parser[DumpFileParser]
-    Parser --> Native[EssentialTypeResolver + MisraAndTypeAnalyzer]
+    CPP --> Misra[Misra.MisraChecker: misra.py 이식]
+    Parser --> Native[EssentialTypeResolver + TypeConversionAnalyzer]
     Runner --> CT[ClangTidyRunner: stub 준비 후 Clang-Tidy 실행]
     XML --> Merge[위치 중복 제거 + 한글 해설 연결]
+    Misra --> Merge
     Native --> Merge
     CT --> Merge
     Merge --> VM
@@ -49,29 +51,22 @@ flowchart TD
 - 전처리 후 `tokenlist`의 파일·줄을 분석 줄 집합으로 수집하고, `rawtokens`의 코드 줄 중 분석 집합에 없는 줄을 미검사로 분류합니다. 토큰 파일 경로는 `file`, raw token 파일 인덱스는 `fileIndex`를 사용합니다.
 - 여러 설정·번역 단위의 분석 줄은 합집합으로 병합합니다. 토큰 기반 커버리지는 모든 규칙의 판정 성공이나 완전한 분기 커버리지의 증명이 아닙니다.
 
-### 4. C# 타입 및 MISRA 검사
+### 4. C# MISRA 검사기
 
-`EssentialTypeResolver`는 가능한 식에 대해 MISRA 필수 타입 범주·비트 폭을 계산합니다. 대입·인자·반환의 변환은 정수 승격 후 타입만으로 판정하지 않으며, 정수 상수식의 표현 가능 범위 예외를 처리합니다. 캐스트 자체와 캐스트 결과에서 최종 대상까지의 변환은 별도로 검사합니다. 해석할 수 없는 정보는 일부 검사 생략으로 이어집니다.
+`Services/Misra/`는 Cppcheck 2.22 `addons/cppcheckdata.py`·`misra.py`·`misra_9.py`를 C#으로 옮긴 것입니다. dump마다 원본 `misra.py --cli <dump>`와 같은 순서로 규칙 함수를 실행하고, 같은 규칙 ID(`misra-c2012-X.Y`, 설정 누락 안내 `misra-config`)와 같은 파일·줄·열을 보고합니다. 원본처럼 같은 위치·규칙은 한 번만 보고하고, 원본 Python이 예외로 중단되는 dump에서는 그 전까지의 위반만 보고합니다.
 
-### C# 분석기의 구현 범위
+- 원본의 Python 동작(문자열 `in` 부분 문자열 검사, 음수 색인, `None` 서식, `is_errno_setting_function`의 쉼표 누락으로 합쳐진 함수 이름 등)도 결과가 같도록 그대로 옮겼습니다.
+- 표준 라이브러리 식별자·키워드 표(`MisraTables.cs`)는 원본 모듈 상수에서 `MisraParity/gen_misra_tables.py`로 생성합니다.
+- 파일 간(CTU) 규칙 2.3, 2.4, 2.5, 5.6~5.9, 8.5~8.7은 원본도 단일 dump 실행에서 요약만 남기므로 보고하지 않습니다.
+- 9.1은 `CppcheckRunner`에서 `uninitvar`, `uninitdata`, `uninitStructMember`를 매핑합니다.
 
-| 경로 | 규칙 ID |
-| --- | --- |
-| 선언 | 8.2 |
-| 필수 타입 | 10.1, 10.3, 10.4 |
-| 포인터 변환 | 11.3, 11.4, 11.5, 11.8 |
-| 수식 | 12.1, 12.2, 13.4, 13.5, 13.6 |
-| 제어 흐름 | 14.1, 14.4, 15.1, 15.6, 16.3, 16.4 |
-| 함수 | 17.2, 17.7, 17.8 |
-| 전처리기·라이브러리 | 20.5, 21.3, 21.6 |
+**차분 검증:** `MisraParity/compare_misra.py <dump 폴더>`는 같은 dump에 원본 `misra.py`와 C# 검사기를 실행해 위반 목록을 비교합니다. Cppcheck 2.22 공식 misra 테스트 파일(4가지 표준·플랫폼 조합), `test/cfg`·`samples` C 파일, 내장 샘플, 65개 파일의 실제 프로젝트로 만든 dump 177개에서 원본 위반 59,357건과 모두 일치했습니다. Cppcheck를 올리면 표를 다시 생성하고 이 비교를 다시 실행해야 합니다.
 
-위 25개는 `MisraAndTypeAnalyzer`가 직접 보고하는 규칙이며, 각 규칙 전체의 완전한 구현을 뜻하지 않습니다. 9.1은 `CppcheckRunner`에서 `uninitvar`, `uninitdata`, `uninitStructMember`를 매핑합니다. 자동 변수에 대한 규정과 동적 메모리 진단의 범위를 동일시하지 않도록 실제 진단 문맥을 검토해야 합니다.
+### 5. 자체 타입 변환 검사
 
-별도 자체 ID는 `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`입니다. Python addon 파일이 저장소에 있어도 런타임에 실행하지 않으며, Python `misra.py` 전체와 결과가 동일하다고 가정하지 않습니다.
+`EssentialTypeResolver`는 가능한 식에 대해 필수 타입 범주·비트 폭을 계산하고, `TypeConversionAnalyzer`가 MISRA와 별도인 자체 ID `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`를 보고합니다. 대입·인자·반환의 변환은 정수 승격 후 타입만으로 판정하지 않으며, 정수 상수식의 표현 가능 범위 예외를 처리합니다. 캐스트 자체와 캐스트 결과에서 최종 대상까지의 변환은 별도로 검사합니다. 해석할 수 없는 정보는 일부 검사 생략으로 이어집니다.
 
-17.2는 설정 단위 호출 그래프에서 직접·간접 재귀를 찾고 보고 위치만 대상 파일로 제한합니다. 별도 번역 단위 사이의 전체 호출 그래프를 구축하지 않습니다. 17.8은 모든 대입 연산 및 증감을 검사합니다. 12.1은 현재 구현의 비트·비교 연산 혼합 경로에서 실제 토큰 사이의 괄호를 확인하며 모든 연산자 조합을 검사하는 것은 아닙니다.
-
-### 5. 선택적 Clang-Tidy 분석
+### 6. 선택적 Clang-Tidy 분석
 
 실행 파일이 존재하고 옵션이 켜진 경우 `-checks=-*,bugprone-*,cert-*,clang-analyzer-*`, `-xc`, 선택한 `-std`, `--target`, `-nostdinc`를 전달합니다. 내장 간이 표준 헤더, 프로젝트 포함 경로, 임시 stub 경로, 매크로도 추가합니다. `--force`는 전달하지 않습니다.
 
@@ -79,7 +74,7 @@ flowchart TD
 
 TI DSP에는 `armv7r-none-eabi` 대체 트리플을 사용합니다. Cppcheck의 COFF 40비트 `long`을 Clang-Tidy에 동일하게 구현하는 경로는 없습니다. 타겟 트리플·간이 헤더에 따른 모델 차이를 실제 SDK·컴파일러 검증과 구분해야 합니다.
 
-### 6. 병합과 표시
+### 7. 병합과 표시
 
 진단 중복 키는 **규칙 ID + 정규화된 파일 경로 + 줄 + 열**입니다. 같은 줄의 다른 규칙·열은 유지하며, 서로 다른 도구의 동일 규칙·위치 결과는 중복 제거될 수 있습니다. 예외 키는 **규칙 ID + 파일 + 줄**이므로 열 단위 중복 키보다 범위가 넓습니다.
 

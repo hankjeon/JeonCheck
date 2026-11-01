@@ -20,7 +20,7 @@ public class AnalysisRunResult
 public class CppcheckRunner
 {
     private readonly DumpFileParser _dumpParser = new();
-    private readonly MisraAndTypeAnalyzer _misraAnalyzer = new();
+    private readonly TypeConversionAnalyzer _typeAnalyzer = new();
     private readonly ClangTidyRunner _clangTidyRunner = new();
 
     private static readonly Regex CppcheckPercentRegex = new(
@@ -248,7 +248,7 @@ public class CppcheckRunner
     }
 
     /// <summary>
-    /// Cppcheck 1회 실행 단위: 프로세스 실행 → XML 결과 해석 → 입력 파일별 .dump 해석(라인 커버리지 + C# 네이티브 검사)
+    /// Cppcheck 1회 실행 단위: 프로세스 실행 → XML 결과 해석 → 입력 파일별 .dump 해석(MISRA 검사 + 라인 커버리지 + 자체 타입 검사)
     /// </summary>
     private async Task RunCppcheckPassAsync(
         string cppcheckExe,
@@ -372,7 +372,7 @@ public class CppcheckRunner
                 string.Empty));
         }
 
-        // 5. 생성된 .dump 파일 파싱 (라인별 검사 완료 / 미검사 판별 + C# 네이티브 MISRA / Narrowing 검출)
+        // 5. 생성된 .dump 파일 해석 (MISRA 검사 + 라인별 검사 완료 / 미검사 판별 + 자체 타입 변환 검사)
         double dumpSpan = endPct - cppcheckExecEndPct;
         for (int i = 0; i < inputFiles.Count; i++)
         {
@@ -391,10 +391,14 @@ public class CppcheckRunner
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpMissing",
                     "AST 덤프 파일 미생성",
-                    $"[분석 범위 안내] '{srcName}'의 AST 덤프(.dump) 파일이 생성되지 않아 라인별 검사 상태 표시와 C# 네이티브 MISRA/축소 변환 검사를 수행하지 못했습니다. 소스 폴더에 쓰기 권한이 있는지, 구문 오류가 없는지 확인하세요.",
+                    $"[분석 범위 안내] '{srcName}'의 AST 덤프(.dump) 파일이 생성되지 않아 라인별 검사 상태 표시와 MISRA·축소 변환 검사를 수행하지 못했습니다. 소스 폴더에 쓰기 권한이 있는지, 구문 오류가 없는지 확인하세요.",
                     srcFile));
                 continue;
             }
+
+            // MISRA C 2012: Cppcheck 2.22 원본 misra.py를 C#으로 옮긴 검사기 (원본과 같은 위치·규칙으로 보고).
+            // 원본처럼 아래 라인 커버리지·자체 검사의 dump 해석과는 독립적으로 실행한다.
+            AddMisraViolations(cppcheckExe, dumpFile, srcFile, srcName, targetFilesNormalized, rulesById, result, keys);
 
             DumpDocument dumpDoc;
             try
@@ -406,7 +410,7 @@ public class CppcheckRunner
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpParseError",
                     "AST 덤프 파일 해석 실패",
-                    $"[분석 범위 안내] '{srcName}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 C# 네이티브 검사를 건너뛰었습니다. ({ex.Message})",
+                    $"[분석 범위 안내] '{srcName}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 축소 변환 검사를 건너뛰었습니다. ({ex.Message})",
                     srcFile));
                 continue;
             }
@@ -431,13 +435,79 @@ public class CppcheckRunner
                 }
             }
 
-            // C# 네이티브 MISRA C 2012 & Narrowing Conversion 검사
-            var astIssues = _misraAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
+            // 자체 타입 변환 검사 (implicitNarrowing, implicitSignConversion, explicitNarrowingCast, pointerSizeMismatch)
+            var astIssues = _typeAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
             foreach (var issue in astIssues)
             {
                 if (keys.TryAdd(issue.RuleId, issue.FilePath, issue.Line, issue.Column))
                     result.Defects.Add(issue);
             }
+        }
+    }
+
+    private static void AddMisraViolations(
+        string cppcheckExe,
+        string dumpFile,
+        string srcFile,
+        string srcName,
+        HashSet<string> targetFilesNormalized,
+        Dictionary<string, RuleInfo> rulesById,
+        AnalysisRunResult result,
+        DedupKeys keys)
+    {
+        var misra = Misra.MisraChecker.CheckDump(dumpFile);
+        if (misra.Error != null && misra.Violations.Count == 0)
+        {
+            // 원본 misra.py가 실패해 위반을 하나도 내지 못한 경우와 같은 안내
+            result.NotesAndInfos.Add(CreateNote(
+                "misraAddonError",
+                "MISRA 검사 실패",
+                $"[분석 범위 안내] '{srcName}'의 MISRA 검사가 실패하여 MISRA 검사 결과가 없습니다. ({misra.Error.GetType().Name}: {misra.Error.Message})",
+                srcFile));
+            return;
+        }
+
+        // dump의 상대 경로는 Cppcheck 실행 폴더 기준이다
+        string baseDir = Path.GetDirectoryName(cppcheckExe) ?? PathResolver.RootDirectory;
+        foreach (var v in misra.Violations)
+        {
+            if (string.IsNullOrEmpty(v.File))
+                continue;
+            string file = Path.GetFullPath(v.File, baseDir);
+            if (!targetFilesNormalized.Contains(AnalysisIssue.NormalizePath(file)))
+                continue;
+
+            string ruleId = v.RuleId;
+            if (rulesById.TryGetValue(ruleId, out var rule))
+            {
+                if (!rule.IsEnabled)
+                    continue;
+            }
+            else
+            {
+                // misra.py 출력 심각도: 규칙 위반은 style, 설정 누락(misra-config)은 error
+                rule = RuleInfo.CreateUnregistered(ruleId, ruleId == "misra-config" ? "Error" : "Style", "MISRA addon");
+                rule.Title = $"MISRA C 2012 Rule {ruleId.Replace("misra-c2012-", string.Empty)}";
+            }
+
+            if (!keys.TryAdd(ruleId, file, v.Line, v.Column))
+                continue;
+
+            string raw = $"misra.py 검출: MISRA C 2012 Rule {ruleId.Replace("misra-c2012-", string.Empty)}";
+            result.Defects.Add(new AnalysisIssue
+            {
+                RuleId = ruleId,
+                Category = rule.Category,
+                Severity = rule.Severity,
+                Obligation = rule.Obligation,
+                Title = rule.Title,
+                Message = !string.IsNullOrEmpty(rule.Summary) ? $"{rule.Summary} ({raw})" : raw,
+                FilePath = file,
+                Line = v.Line,
+                Column = v.Column,
+                IsInfoOrNote = false,
+                RuleDetails = rule
+            });
         }
     }
 

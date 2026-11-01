@@ -18,7 +18,8 @@
     <Compile Include="../JeonCheck/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
     <Compile Include="../JeonCheck/Services/DumpFileParser.cs" Link="Services/DumpFileParser.cs" />
     <Compile Include="../JeonCheck/Services/EssentialTypeResolver.cs" Link="Services/EssentialTypeResolver.cs" />
-    <Compile Include="../JeonCheck/Services/MisraAndTypeAnalyzer.cs" Link="Services/MisraAndTypeAnalyzer.cs" />
+    <Compile Include="../JeonCheck/Services/TypeConversionAnalyzer.cs" Link="Services/TypeConversionAnalyzer.cs" />
+    <Compile Include="../JeonCheck/Services/Misra/*.cs" Link="Services/Misra/%(Filename)%(Extension)" />
     <Compile Include="../JeonCheck/Services/CppcheckRunner.cs" Link="Services/CppcheckRunner.cs" />
     <Compile Include="../JeonCheck/Services/ClangTidyRunner.cs" Link="Services/ClangTidyRunner.cs" />
     <Compile Include="../JeonCheck/Services/IncludePathResolver.cs" Link="Services/IncludePathResolver.cs" />
