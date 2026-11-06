@@ -14,6 +14,7 @@
     <Compile Include="../JeonCheck/Models/TargetPreset.cs" Link="Models/TargetPreset.cs" />
     <Compile Include="../JeonCheck/Models/RuleIssueGroup.cs" Link="Models/RuleIssueGroup.cs" />
     <Compile Include="../JeonCheck/Models/ProjectFileModel.cs" Link="Models/ProjectFileModel.cs" />
+    <Compile Include="../JeonCheck/Models/AnalysisSnapshot.cs" Link="Models/AnalysisSnapshot.cs" />
     <Compile Include="../JeonCheck/Models/CodeLineViewModel.cs" Link="Models/CodeLineViewModel.cs" />
     <Compile Include="../JeonCheck/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
     <Compile Include="../JeonCheck/Services/DumpFileParser.cs" Link="Services/DumpFileParser.cs" />
@@ -28,6 +29,9 @@
     <Compile Include="../JeonCheck/Services/RuleSummaryBuilder.cs" Link="Services/RuleSummaryBuilder.cs" />
     <Compile Include="../JeonCheck/Services/DataRepository.cs" Link="Services/DataRepository.cs" />
     <Compile Include="../JeonCheck/Services/ExternalEditorLauncher.cs" Link="Services/ExternalEditorLauncher.cs" />
+    <Compile Include="../JeonCheck/Services/SourceFileEncoding.cs" Link="Services/SourceFileEncoding.cs" />
+    <Compile Include="../JeonCheck/Services/CCodeHighlighter.cs" Link="Services/CCodeHighlighter.cs" />
+    <Compile Include="../JeonCheck/Services/AnalysisSnapshotStore.cs" Link="Services/AnalysisSnapshotStore.cs" />
     <None Include="../../data/rules_ko.json" Link="rules_ko.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

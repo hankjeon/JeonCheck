@@ -102,7 +102,7 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
 
 ## 3. 프로젝트 파일 포맷 (`*.jcproj`)
 
-사용자가 구성한 프로젝트 환경과 룰셋 선택 상태를 JSON 형식의 `*.jcproj` 파일로 저장한다. 분석 결과·노트·검색어·규칙별 요약 및 접기 상태는 저장하지 않으며 불러온 뒤 분석을 다시 실행해야 한다. (구현: `Models/ProjectFileModel.cs`, `Services/DataRepository.cs`)
+사용자가 구성한 프로젝트 환경과 룰셋 선택 상태, 분석 결과 스냅샷을 JSON 형식의 `*.jcproj` 파일로 저장한다. 검색어·규칙별 요약 및 접기 상태는 저장하지 않는다. 불러오면 저장된 결과를 바로 표시하고, 설정·파일 집합이 같으면 바뀐 파일만 다시 분석한다. (구현: `Models/ProjectFileModel.cs`·`Models/AnalysisSnapshot.cs`, `Services/DataRepository.cs`·`Services/AnalysisSnapshotStore.cs`)
 
 ```json
 {
@@ -147,9 +147,34 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
       "ruleId": "misra-c2012-11.4",
       "filePath": "src/control_loop.c",
       "line": 45,
-      "message": "포인터와 정수 타입 간의 형변환('unsigned int (32-bit)' -> 'unsigned int* (32-bit ptr)')이 사용되었습니다."
+      "message": "포인터와 정수 타입 간의 형변환('unsigned int (32-bit)' -> 'unsigned int* (32-bit ptr)')이 사용되었습니다.",
+      "codeText": "    reg = (unsigned int *)addr;",
+      "needsReview": false
     }
-  ]
+  ],
+  "savedAnalysis": {
+    "version": 1,
+    "savedAt": "2026-10-31T15:00:00+09:00",
+    "settingsHash": "sha256:프리셋·표준·매크로·force·Clang·룰셋·규칙DB 해시",
+    "globalNotes": [],
+    "files": [
+      {
+        "filePath": "src/control_loop.c",
+        "hash": "sha256:파일 내용 해시",
+        "length": 1234,
+        "defects": [],
+        "coverage": {
+          "filePath": "src/control_loop.c",
+          "analyzed": [{ "start": 1, "end": 40 }],
+          "skipped": [],
+          "directives": []
+        },
+        "notes": [],
+        "includes": ["include/regs.h"]
+      }
+    ],
+    "extras": []
+  }
 }
 ```
 
@@ -167,17 +192,18 @@ Cppcheck 비트 폭은 플랫폼 XML과 생성된 dump에서, Clang-Tidy 비트 
 | `excludedNonTargetPaths` | 비대상 루트 폴더 아래에서 사용자가 제거하거나 검사 대상으로 옮긴 하위 파일/폴더 |
 | `enabledRuleIds` | 저장 시점에 활성화(ON)된 규칙 ID 목록. 발견한 미등록 런타임 ID도 포함 |
 | `disabledRuleIds` | 저장 시점에 비활성화(OFF)된 규칙 ID 목록. 불러올 때 두 목록 중 어디에도 없는 규칙(저장 이후 `rules_ko.json`에 새로 추가된 규칙)은 규칙 DB의 `defaultEnabled` 값을 따른다 |
-| `suppressedIssues` | 개별 예외(무시) 처리 항목. `ruleId` + `filePath` + `line` 조합으로 결함을 식별하며, `message`는 예외 처리 당시의 검출 메시지(표시용) |
+| `suppressedIssues` | 개별 예외(무시) 처리 항목. `ruleId` + `filePath` + `line` 조합으로 결함을 식별하며, `message`는 예외 처리 당시의 검출 메시지(표시용). `codeText`는 당시 코드 한 줄(위치 재고정용), `needsReview`는 위치를 찾지 못한 항목 표시 |
 
 - **폴더 트리 복원 방식**: 불러오기 시 `targetPaths`/`nonTargetPaths`의 각 루트 폴더를 디스크에서 다시 스캔하여 트리를 구성하고(`.c`, `.h`, `.cpp`, `.hpp`만 포함), `excluded*Paths`에 기록된 하위 항목은 제외한다. 대상 폴더의 일부를 비대상으로 옮긴 경우 해당 경로는 `excludedTargetPaths`와 `nonTargetPaths`에 함께 기록된다.
-- **경로 저장 원칙**: `.jcproj` 파일이 위치한 폴더 기준의 상대 경로를 우선 저장하여 프로젝트 폴더 이동 시에도 호환성을 유지하며, 다른 드라이브 등 상대 경로 변환이 불가능한 경우 절대 경로를 사용한다. (대상·참조·제외·예외 경로에 동일 적용)
+- **경로 저장 원칙**: `.jcproj` 파일이 위치한 폴더 기준의 상대 경로를 우선 저장하여 프로젝트 폴더 이동 시에도 호환성을 유지하며, 다른 드라이브 등 상대 경로 변환이 불가능한 경우 절대 경로를 사용한다. (대상·참조·제외·예외·스냅샷 경로에 동일 적용)
 - **미등록 선택 복원**: 저장된 ON/OFF ID가 DB에 없으면 공통 해설의 임시 규칙을 만든 뒤 선택 상태를 복원한다. 별도의 번역 텍스트나 원문 메시지 카탈로그를 저장하는 것은 아니다. 이후 재분석에서도 OFF 상태를 적용한다.
-- **하위 호환**: `excludedTargetPaths`, `excludedNonTargetPaths`가 없는 이전 버전 파일도 그대로 불러올 수 있다 (제외 항목 없음으로 처리). `disabledRuleIds`가 없는 이전 버전 파일은 `enabledRuleIds`에 있는 규칙만 켜고 나머지는 모두 끈 상태로 불러온다.
+- **하위 호환**: `excludedTargetPaths`, `excludedNonTargetPaths`가 없는 이전 버전 파일도 그대로 불러올 수 있다 (제외 항목 없음으로 처리). `disabledRuleIds`가 없는 이전 버전 파일은 `enabledRuleIds`에 있는 규칙만 켜고 나머지는 모두 끈 상태로 불러온다. `savedAnalysis`·`codeText`가 없는 이전 버전 파일은 저장된 결과 없이 불러오며, 예외 위치는 재고정하지 않는다.
+- **증분 재분석**: 설정 해시와 파일 집합이 스냅샷과 같으면 바뀐 파일만 다시 분석한다. 바뀐 `.c`는 해당 파일만, 바뀐 헤더는 그 헤더를 포함한 소스와 헤더 자신을 다시 분석한다. 설정·룰셋 변경이나 파일 추가·삭제는 전체 재분석한다.
 
 ## 4. 결과와 규칙별 요약의 런타임 모델
 
 - `AnalysisIssue`: 규칙 ID, 심각도·정책, 메시지, 파일·줄·열, 한글 규칙 정보 참조를 갖는다. 중복 제거 키는 규칙 + 정규화 파일 + 줄 + 열이다.
-- `SuppressedIssueEntry`: 예외 키는 규칙 + 정규화 파일 + 줄이다. 열이 없으므로 같은 줄의 동일 규칙 진단을 함께 제외한다. `message`는 저장 당시 표시용이며 예외 식별 키에 포함되지 않는다.
+- `SuppressedIssueEntry`: 예외 키는 규칙 + 정규화 파일 + 줄이다. 열이 없으므로 같은 줄의 동일 규칙 진단을 함께 제외한다. `message`는 저장 당시 표시용이며 예외 식별 키에 포함되지 않는다. `codeText`는 당시 코드 한 줄(재고정용), `needsReview`는 위치 확인 필요 표시다.
 - `RuleIssueGroup`: 규칙 ID·한글 제목·발생 항목 목록과 접기 상태를 가진다. Count는 진단 항목 수이며 그룹은 건수 내림차순, 동률이면 ID 순으로 생성된다.
 - `RuleIssueOccurrence`: 원본 `AnalysisIssue` 참조와 현재 파일에서 읽은 코드 한 줄을 갖는다. 위치는 파일·줄·열을 사용하며 원본 참조로 상세 설명과 코드 이동을 연결한다.
-- 이들 요약 모델은 `RefreshFilteredDefects`가 만든 현재 표시 집합에서 파생되며 별도 JSON 형식이나 `.jcproj` 필드로 저장되지 않는다.
+- 이들 요약 모델은 `RefreshFilteredDefects`가 만든 현재 표시 집합에서 파생된다. 접기 상태는 저장되지 않지만, 결함·노트·줄 커버리지·파일 지문은 `savedAnalysis` 스냅샷으로 `.jcproj`에 저장된다.

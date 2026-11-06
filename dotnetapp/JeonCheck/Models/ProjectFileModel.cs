@@ -55,6 +55,10 @@ public class ProjectFileModel
 
     [JsonPropertyName("suppressedIssues")]
     public List<SuppressedIssueEntry> SuppressedIssues { get; set; } = new();
+
+    // 분석 결과 스냅샷(결함·노트·커버리지·파일 지문). 없으면 이전 버전 파일로 취급해 재분석한다.
+    [JsonPropertyName("savedAnalysis")]
+    public AnalysisSnapshot? SavedAnalysis { get; set; }
 }
 
 public class SuppressedIssueEntry
@@ -70,6 +74,17 @@ public class SuppressedIssueEntry
 
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    // 예외 처리 당시의 코드 한 줄. 파일이 바뀌면 재고정 기준으로 사용한다(이전 버전 파일에는 없음).
+    [JsonPropertyName("codeText")]
+    public string? CodeText { get; set; }
+
+    // 코드가 크게 바뀌어 위치를 찾지 못한 항목
+    [JsonPropertyName("needsReview")]
+    public bool NeedsReview { get; set; }
+
+    [JsonIgnore]
+    public string ReviewDisplay => NeedsReview ? "확인 필요" : string.Empty;
 
     [JsonIgnore]
     public string SuppressionKey => $"{RuleId}|{AnalysisIssue.NormalizePath(FilePath)}|{Line}";

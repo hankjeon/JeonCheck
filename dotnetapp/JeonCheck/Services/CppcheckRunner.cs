@@ -15,6 +15,9 @@ public class AnalysisRunResult
     public List<AnalysisIssue> NotesAndInfos { get; set; } = new();
     public Dictionary<string, FileLineCoverage> CoverageByFile { get; set; } = new();
     public string CommandLineSummary { get; set; } = string.Empty;
+
+    // .dump 해석 중 수집한 소스별 참조 파일(포함 헤더). 키·값 모두 정규화 경로.
+    public Dictionary<string, HashSet<string>> IncludeMapByFile { get; set; } = new();
 }
 
 public class CppcheckRunner
@@ -76,7 +79,8 @@ public class CppcheckRunner
         IReadOnlyList<SourceTreeNode> nonTargetRoots,
         IReadOnlyList<RuleInfo> allRules,
         IProgress<AnalysisProgressInfo>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? incrementalFiles = null)
     {
         var result = new AnalysisRunResult();
         string cppcheckExe = PathResolver.CppcheckExePath;
@@ -91,6 +95,16 @@ public class CppcheckRunner
             .Select(f => f.FullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // 증분 실행: 전체 트리 대신 바뀐 파일만 대상으로 한다.
+        if (incrementalFiles != null)
+        {
+            targetFiles = incrementalFiles
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(f => Path.GetFullPath(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         if (targetFiles.Count == 0)
             return result;
@@ -178,7 +192,7 @@ public class CppcheckRunner
             // 3~5. 1차 분석: 소스 파일(.c) 기준
             await RunCppcheckPassAsync(cppcheckExe, baseArgs, inputSourceFiles, dumpGuard,
                 targetFilesNormalized, rulesById, result, keys,
-                2.0, firstPassEndPct, progress, cancellationToken);
+                2.0, firstPassEndPct, progress, cancellationToken, result.IncludeMapByFile);
 
             // 5-1. 2차 분석: 어느 소스 파일에도 포함되지 않아 1차 분석 dump에 나타나지 않은 대상 헤더를 직접 검사
             if (headersExcludedFromFirstPass)
@@ -198,7 +212,7 @@ public class CppcheckRunner
 
                     await RunCppcheckPassAsync(cppcheckExe, baseArgs, uncoveredHeaders, dumpGuard,
                         targetFilesNormalized, rulesById, result, keys,
-                        firstPassEndPct, secondPassEndPct, progress, cancellationToken);
+                        firstPassEndPct, secondPassEndPct, progress, cancellationToken, result.IncludeMapByFile);
                     clangInputFiles.AddRange(uncoveredHeaders);
                 }
             }
@@ -262,7 +276,8 @@ public class CppcheckRunner
         double startPct,
         double endPct,
         IProgress<AnalysisProgressInfo>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<string, HashSet<string>>? includeMap = null)
     {
         double totalSpan = Math.Max(1.0, endPct - startPct);
         double cppcheckExecEndPct = startPct + (totalSpan * 0.75);
@@ -415,7 +430,24 @@ public class CppcheckRunner
                 continue;
             }
 
-            // 라인별 커버리지 병합
+            // 이 .dump를 해석하며 읽은 참조 파일(포함 헤더) 수집. 헤더 변경 시 영향 범위 계산용.
+        if (includeMap != null)
+        {
+            string srcNorm = AnalysisIssue.NormalizePath(srcFile);
+            var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cfgUnit in dumpDoc.Configurations)
+            {
+                foreach (var tok in cfgUnit.Tokens)
+                {
+                    if (!string.IsNullOrEmpty(tok.File))
+                        referenced.Add(AnalysisIssue.NormalizePath(tok.File));
+                }
+            }
+            referenced.Remove(srcNorm);
+            includeMap[srcNorm] = referenced;
+        }
+
+        // 라인별 커버리지 병합
             foreach (var kvp in dumpDoc.CoverageByFile)
             {
                 if (!result.CoverageByFile.TryGetValue(kvp.Key, out var existingCov))

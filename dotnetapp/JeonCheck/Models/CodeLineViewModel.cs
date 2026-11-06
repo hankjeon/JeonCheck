@@ -1,3 +1,5 @@
+using JeonCheck.Services;
+
 namespace JeonCheck.Models;
 
 public enum CodeLineStatus
@@ -15,6 +17,7 @@ public class CodeLineViewModel
 {
     public int LineNumber { get; set; }
     public string CodeText { get; set; } = string.Empty;
+    public List<CodeSegment> HighlightSpans { get; set; } = new();
     public CodeLineStatus Status { get; set; } = CodeLineStatus.Neutral;
     public string InlineAnnotation { get; set; } = string.Empty;
     public string TooltipText { get; set; } = string.Empty;

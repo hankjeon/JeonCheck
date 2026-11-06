@@ -113,6 +113,9 @@ Test("dump XML 파싱 후 캐스트 대입 검사", () =>
 });
 
 DescriptionTests.Run(Test);
+SourceFileEncodingTests.Run(Test);
+CodeHighlightTests.Run(Test);
+AnalysisSnapshotTests.Run(Test);
 RuleSummaryTests.Run(Test);
 UnknownDiagnosticTests.Run(Test);
 MisraCheckerTests.Run(Test);

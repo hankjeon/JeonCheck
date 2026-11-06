@@ -512,6 +512,11 @@ public partial class MainWindow : Window
         ViewModel.CancelAnalysis();
     }
 
+    private void CycleFileEncoding_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.CycleFileEncoding();
+    }
+
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // 창을 닫을 때 진행 중인 분석을 취소하여 Cppcheck/Clang-Tidy 프로세스가 남지 않도록 함

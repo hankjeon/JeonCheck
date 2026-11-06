@@ -83,7 +83,13 @@
                 </Style>
             </DataGrid.Resources>
             <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="검사 포함" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="75" />
+                <DataGridTemplateColumn Header="검사 포함" Width="75">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="규칙 ID" Binding="{Binding Id}" IsReadOnly="True" Width="170" FontFamily="{StaticResource CodingFont}" />
                 <DataGridTextColumn Header="분류" Binding="{Binding Category}" IsReadOnly="True" Width="130" />
                 <DataGridTextColumn Header="기본 심각도" Binding="{Binding SeverityDisplay}" IsReadOnly="True" Width="80" />

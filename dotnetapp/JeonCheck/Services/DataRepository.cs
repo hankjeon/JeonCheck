@@ -75,8 +75,11 @@ public class DataRepository
                 RuleId = s.RuleId,
                 FilePath = ToStoredPath(s.FilePath, projectDir),
                 Line = s.Line,
-                Message = s.Message
-            }).ToList()
+                Message = s.Message,
+                CodeText = s.CodeText,
+                NeedsReview = s.NeedsReview
+            }).ToList(),
+            SavedAnalysis = CloneSnapshotToStored(project.SavedAnalysis, projectDir)
         };
 
         string json = JsonSerializer.Serialize(clone, JsonOptions);
@@ -103,7 +106,74 @@ public class DataRepository
             s.FilePath = ToResolvedPath(s.FilePath, projectDir);
         }
 
+        if (project.SavedAnalysis != null)
+            ResolveSnapshotFromStored(project.SavedAnalysis, projectDir);
+
         return project;
+    }
+
+    private static SnapshotDefect CloneSnapshotDefectToStored(SnapshotDefect d, string? baseDir) => new()
+    {
+        RuleId = d.RuleId,
+        Category = d.Category,
+        Severity = d.Severity,
+        Obligation = d.Obligation,
+        Title = d.Title,
+        Message = d.Message,
+        FilePath = ToStoredPath(d.FilePath, baseDir),
+        Line = d.Line,
+        Column = d.Column,
+        IsInfoOrNote = d.IsInfoOrNote
+    };
+
+    private static SnapshotCoverage CloneSnapshotCoverageToStored(SnapshotCoverage c, string? baseDir) => new()
+    {
+        FilePath = ToStoredPath(c.FilePath, baseDir),
+        Analyzed = c.Analyzed,
+        Skipped = c.Skipped,
+        Directives = c.Directives
+    };
+
+    private static SnapshotFileResult CloneSnapshotFileToStored(SnapshotFileResult f, string? baseDir) => new()
+    {
+        FilePath = ToStoredPath(f.FilePath, baseDir),
+        Hash = f.Hash,
+        Length = f.Length,
+        Defects = f.Defects.Select(d => CloneSnapshotDefectToStored(d, baseDir)).ToList(),
+        Coverage = f.Coverage == null ? null : CloneSnapshotCoverageToStored(f.Coverage, baseDir),
+        Notes = f.Notes.Select(d => CloneSnapshotDefectToStored(d, baseDir)).ToList(),
+        Includes = f.Includes.Select(p => ToStoredPath(p, baseDir)).ToList()
+    };
+
+    private static AnalysisSnapshot? CloneSnapshotToStored(AnalysisSnapshot? snapshot, string? baseDir)
+    {
+        if (snapshot == null)
+            return null;
+        return new AnalysisSnapshot
+        {
+            Version = snapshot.Version,
+            SavedAt = snapshot.SavedAt,
+            SettingsHash = snapshot.SettingsHash,
+            GlobalNotes = snapshot.GlobalNotes.Select(d => CloneSnapshotDefectToStored(d, baseDir)).ToList(),
+            Files = snapshot.Files.Select(f => CloneSnapshotFileToStored(f, baseDir)).ToList(),
+            Extras = snapshot.Extras.Select(f => CloneSnapshotFileToStored(f, baseDir)).ToList()
+        };
+    }
+
+    private static void ResolveSnapshotFromStored(AnalysisSnapshot snapshot, string? baseDir)
+    {
+        foreach (var f in snapshot.Files.Concat(snapshot.Extras))
+        {
+            f.FilePath = ToResolvedPath(f.FilePath, baseDir);
+            if (f.Coverage != null)
+                f.Coverage.FilePath = ToResolvedPath(f.Coverage.FilePath, baseDir);
+            foreach (var d in f.Defects.Concat(f.Notes))
+                d.FilePath = ToResolvedPath(d.FilePath, baseDir);
+            for (int i = 0; i < f.Includes.Count; i++)
+                f.Includes[i] = ToResolvedPath(f.Includes[i], baseDir);
+        }
+        foreach (var g in snapshot.GlobalNotes)
+            g.FilePath = ToResolvedPath(g.FilePath, baseDir);
     }
 
     public List<string> LoadRecentProjects()

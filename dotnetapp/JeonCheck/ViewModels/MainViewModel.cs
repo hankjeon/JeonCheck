@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -23,6 +23,8 @@ public class MainViewModel : INotifyPropertyChanged
     private string _statusMessage = "준비 완료";
     private string _currentProjectFilePath = string.Empty;
     private string _currentCodeFilePath = string.Empty;
+    private string _currentFileEncodingName = "UTF-8";
+    private bool _fileEncodingPinned;
     private string _codeStatsSummary = "파일을 선택하면 라인별 검사 상태가 표시됩니다.";
     private AnalysisIssue? _selectedIssue;
     private string _defectSearchText = string.Empty;
@@ -33,6 +35,10 @@ public class MainViewModel : INotifyPropertyChanged
 
     private List<AnalysisIssue> _allRawDefects = new();
     private Dictionary<string, FileLineCoverage> _coverageByFile = new();
+    private AnalysisSnapshot? _lastSnapshot;
+    private string _loadSnapshotNotice = string.Empty;
+    private int _loadReanchored;
+    private int _loadNeedsReview;
     private readonly HashSet<string> _excludedTargetSubpaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _excludedNonTargetSubpaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _analysisCts;
@@ -143,6 +149,7 @@ public class MainViewModel : INotifyPropertyChanged
                 _currentCodeFilePath = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(CurrentCodeFileName));
+                OnPropertyChanged(nameof(CurrentFileEncodingDisplay));
             }
         }
     }
@@ -155,6 +162,48 @@ public class MainViewModel : INotifyPropertyChanged
     {
         get => _codeStatsSummary;
         set { if (_codeStatsSummary != value) { _codeStatsSummary = value; OnPropertyChanged(); } }
+    }
+
+    public string CurrentFileEncodingName
+    {
+        get => _currentFileEncodingName;
+        private set
+        {
+            if (_currentFileEncodingName != value)
+            {
+                _currentFileEncodingName = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CurrentFileEncodingDisplay));
+            }
+        }
+    }
+
+    public string CurrentFileEncodingDisplay => string.IsNullOrEmpty(_currentCodeFilePath)
+        ? "인코딩: -"
+        : $"인코딩: {_currentFileEncodingName}";
+
+    public IReadOnlyList<string> SupportedFileEncodings => SourceFileEncoding.SupportedNames;
+
+    public void ReloadFileWithEncoding(string encodingName)
+    {
+        if (string.IsNullOrWhiteSpace(CurrentCodeFilePath) || !File.Exists(CurrentCodeFilePath))
+            return;
+        LoadFileIntoCodeViewer(CurrentCodeFilePath, encodingName);
+    }
+
+    public void CycleFileEncoding()
+    {
+        var names = SourceFileEncoding.SupportedNames;
+        int index = -1;
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], _currentFileEncodingName, StringComparison.OrdinalIgnoreCase))
+            {
+                index = i;
+                break;
+            }
+        }
+        ReloadFileWithEncoding(names[(index + 1) % names.Count]);
     }
 
     public AnalysisIssue? SelectedIssue
@@ -249,11 +298,11 @@ public class MainViewModel : INotifyPropertyChanged
     };
 
     public string RulesetButtonText => $"⚙ 검사 규칙 설정 ({AllRules.Count(r => r.IsEnabled)}/{AllRules.Count})";
-    public string DefectsTabHeader => $"🚨 결함 및 규칙 위반 ({FilteredDefects.Count})";
-    public string RuleSummaryTabHeader => $"📊 규칙별 요약 ({RuleIssueGroups.Count}개)";
+    public string DefectsTabHeader => $"결함 및 규칙 위반 ({FilteredDefects.Count})";
+    public string RuleSummaryTabHeader => $"규칙별 요약 ({RuleIssueGroups.Count}개)";
     public string RuleSummaryStatusText => $"{RuleIssueGroups.Count}개 규칙 · {FilteredDefects.Count}건 (현재 검색·분류·심각도·예외 처리 기준)";
-    public string NotesTabHeader => $"ℹ️ 노트 / 누락 파일 안내 ({NotesAndInfos.Count})";
-    public string SuppressedTabHeader => $"🔇 예외(무시) 항목 ({SuppressedIssues.Count})";
+    public string NotesTabHeader => $"노트 / 누락 파일 안내 ({NotesAndInfos.Count})";
+    public string SuppressedTabHeader => $"예외(무시) 항목 ({SuppressedIssues.Count})";
     public string TargetFilesSummary => "검사대상 코드";
     public string NonTargetFilesSummary => "참조코드(비대상)";
 
@@ -354,6 +403,7 @@ public class MainViewModel : INotifyPropertyChanged
         TargetRoots.Clear();
         NonTargetRoots.Clear();
         _allRawDefects.Clear();
+        _lastSnapshot = null;
         _coverageByFile.Clear();
         FilteredDefects.Clear();
         RuleIssueGroups.Clear();
@@ -557,6 +607,20 @@ public class MainViewModel : INotifyPropertyChanged
                 StatusMessage = $"[{AnalysisProgressPercent:F0}%] {info.DetailMessage}";
             });
 
+            // 변경 파일만 다시 분석하기 위한 증분 계획 (파일 해시는 백그라운드에서 계산)
+            var incrementalPlan = await Task.Run(() => BuildIncrementalPlan(
+                preset, cStandard, customDefines, forceAllIfdef, enableClangTidy,
+                rulesSnapshot, targetSnapshot, _lastSnapshot), token);
+
+            if (!ReferenceEquals(_analysisCts, cts))
+                return;
+
+            if (incrementalPlan.UseIncremental && incrementalPlan.RunFiles.Count == 0)
+            {
+                StatusMessage = "변경된 파일이 없어 저장된 분석 결과를 그대로 표시합니다.";
+                return;
+            }
+
             var runResult = await Task.Run(() => _runner.RunAnalysisAsync(
                 preset,
                 cStandard,
@@ -567,18 +631,43 @@ public class MainViewModel : INotifyPropertyChanged
                 nonTargetSnapshot,
                 rulesSnapshot,
                 progress,
-                token), token);
+                token, incrementalFiles: incrementalPlan.UseIncremental ? incrementalPlan.RunFiles : null), token);
 
             // 분석 도중 작업 공간이 바뀌었으면(새 프로젝트/불러오기) 이전 결과는 버림
             if (!ReferenceEquals(_analysisCts, cts))
                 return;
 
-            _allRawDefects = runResult.Defects;
-            _coverageByFile = runResult.CoverageByFile;
+            if (incrementalPlan.UseIncremental)
+            {
+                // 바뀐 파일의 결과만 교체하고 나머지는 유지한다.
+                var replacedNormPaths = new HashSet<string>(
+                    incrementalPlan.RunFiles.Select(AnalysisIssue.NormalizePath).Concat(runResult.CoverageByFile.Keys),
+                    StringComparer.OrdinalIgnoreCase);
+                var mergedNotes = NotesAndInfos.ToList();
+                AnalysisSnapshotStore.ReplaceFileResults(
+                    _allRawDefects, _coverageByFile, mergedNotes, replacedNormPaths, runResult, replaceGlobalNotes: false);
+                NotesAndInfos.Clear();
+                foreach (var mergedNote in mergedNotes)
+                    NotesAndInfos.Add(mergedNote);
+            }
+            else
+            {
+                _allRawDefects = runResult.Defects;
+                _coverageByFile = runResult.CoverageByFile;
 
-            NotesAndInfos.Clear();
-            foreach (var n in runResult.NotesAndInfos)
-                NotesAndInfos.Add(n);
+                NotesAndInfos.Clear();
+                foreach (var n in runResult.NotesAndInfos)
+                    NotesAndInfos.Add(n);
+            }
+
+            _lastSnapshot = BuildSnapshotFromResults(
+                incrementalPlan.SettingsHash,
+                targetSnapshot,
+                nonTargetSnapshot,
+                _allRawDefects,
+                _coverageByFile,
+                NotesAndInfos.ToList(),
+                runResult.IncludeMapByFile);
 
             RefreshFilteredDefects();
             UpdateTreeDefectBadges();
@@ -641,15 +730,24 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = "분석을 취소하고 있습니다...";
     }
 
-    public void LoadFileIntoCodeViewer(string filePath)
+    public void LoadFileIntoCodeViewer(string filePath, string? encodingName = null)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             return;
 
+        bool sameFile = string.Equals(
+            AnalysisIssue.NormalizePath(CurrentCodeFilePath),
+            AnalysisIssue.NormalizePath(Path.GetFullPath(filePath)),
+            StringComparison.Ordinal);
+        string? requestedEncoding = encodingName ?? (sameFile && _fileEncodingPinned ? _currentFileEncodingName : null);
+
         CurrentCodeFilePath = Path.GetFullPath(filePath);
         CurrentFileLines.Clear();
 
-        string[] rawLines = File.ReadAllLines(CurrentCodeFilePath);
+        var decodedFile = SourceFileEncoding.ReadAllLines(CurrentCodeFilePath, requestedEncoding);
+        _fileEncodingPinned = requestedEncoding != null;
+        CurrentFileEncodingName = decodedFile.EncodingName;
+        string[] rawLines = decodedFile.Lines;
         string normKey = AnalysisIssue.NormalizePath(CurrentCodeFilePath);
 
         _coverageByFile.TryGetValue(normKey, out var coverage);
@@ -674,6 +772,7 @@ public class MainViewModel : INotifyPropertyChanged
         int defectLineCount = 0;
         int suppressedLineCount = 0;
 
+                bool inBlockComment = false;
         for (int i = 0; i < rawLines.Length; i++)
         {
             int lineNum = i + 1;
@@ -722,7 +821,6 @@ public class MainViewModel : INotifyPropertyChanged
                 {
                     analyzedCount++;
                     lineVm.Status = CodeLineStatus.Analyzed;
-                    lineVm.TooltipText = "검사 완료 줄 (전처리 및 AST 정적 분석 수행됨)";
                 }
                 else if (coverage.SkippedLines.Contains(lineNum))
                 {
@@ -733,6 +831,10 @@ public class MainViewModel : INotifyPropertyChanged
                 }
             }
 
+                        var highlightSpans = CCodeHighlighter.TokenizeLine(text, ref inBlockComment);
+            lineVm.HighlightSpans = lineVm.Status is CodeLineStatus.Skipped or CodeLineStatus.Suppressed
+                ? highlightSpans.Select(s => new CodeSegment(s.Text, null)).ToList()
+                : highlightSpans;
             CurrentFileLines.Add(lineVm);
         }
 
@@ -856,7 +958,8 @@ public class MainViewModel : INotifyPropertyChanged
                     RuleId = issue.RuleId,
                     FilePath = issue.FilePath,
                     Line = issue.Line,
-                    Message = issue.Message
+                    Message = issue.Message,
+                    CodeText = lineVm.CodeText
                 });
             }
         }
@@ -893,7 +996,8 @@ public class MainViewModel : INotifyPropertyChanged
             RuleId = issue.RuleId,
             FilePath = issue.FilePath,
             Line = issue.Line,
-            Message = issue.Message
+            Message = issue.Message,
+                    CodeText = GetCodeText(issue.FilePath, issue.Line)
         });
 
         RefreshFilteredDefects();
@@ -901,6 +1005,84 @@ public class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedIssueToggleButtonText));
         StatusMessage = $"예외(무시) 처리됨: {issue.FileName}:{issue.Line} [{issue.RuleId}]";
     }
+
+    private string? GetCodeText(string filePath, int line)
+    {
+        if (line <= 0)
+            return null;
+        try
+        {
+            if (string.Equals(AnalysisIssue.NormalizePath(CurrentCodeFilePath), AnalysisIssue.NormalizePath(filePath), StringComparison.Ordinal)
+                && line <= CurrentFileLines.Count)
+                return CurrentFileLines[line - 1].CodeText;
+            if (!File.Exists(filePath))
+                return null;
+            var decoded = SourceFileEncoding.ReadAllLines(filePath, null);
+            return line <= decoded.Lines.Length ? decoded.Lines[line - 1] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string[]? ReadCodeLines(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+                return null;
+            return SourceFileEncoding.ReadAllLines(filePath, null).Lines;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ReanchorSuppressionsOnLoad()
+    {
+        _loadReanchored = 0;
+        _loadNeedsReview = 0;
+        if (SuppressedIssues.Count == 0)
+            return;
+        var summary = AnalysisSnapshotStore.ReanchorSuppressions(SuppressedIssues, ReadCodeLines);
+        _loadReanchored = summary.Reanchored;
+        _loadNeedsReview = summary.NeedsReview;
+    }
+
+    private static bool IsCSourceFile(string path)
+        => path.EndsWith(".c", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase);
+
+    private static SnapshotDefect ToSnapshotDefect(AnalysisIssue issue) => new()
+    {
+        RuleId = issue.RuleId,
+        Category = issue.Category,
+        Severity = issue.Severity,
+        Obligation = issue.Obligation,
+        Title = issue.Title,
+        Message = issue.Message,
+        FilePath = issue.FilePath,
+        Line = issue.Line,
+        Column = issue.Column,
+        IsInfoOrNote = issue.IsInfoOrNote
+    };
+
+    private static AnalysisIssue ToAnalysisIssue(SnapshotDefect saved, Dictionary<string, RuleInfo> rulesById) => new()
+    {
+        RuleId = saved.RuleId,
+        Category = saved.Category,
+        Severity = saved.Severity,
+        Obligation = saved.Obligation,
+        Title = saved.Title,
+        Message = saved.Message,
+        FilePath = saved.FilePath,
+        Line = saved.Line,
+        Column = saved.Column,
+        IsInfoOrNote = saved.IsInfoOrNote,
+        RuleDetails = rulesById.TryGetValue(saved.RuleId, out var rule) ? rule : null
+    };
 
     public void RestoreSuppressedIssue(SuppressedIssueEntry entry)
     {
@@ -937,6 +1119,311 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = $"규칙 '{ruleId}' 전체가 현재 프로젝트 검사에서 제외(OFF)되었습니다.";
     }
 
+    private sealed record IncrementalPlan(
+        string SettingsHash,
+        List<string> CurrentFiles,
+        bool UseIncremental,
+        List<string> RunFiles);
+
+    private static string BuildSettingsHash(
+        string presetId,
+        string? platformXml,
+        string cStandard,
+        string customDefines,
+        bool forceAllIfdefConfigs,
+        bool enableClangTidy,
+        IEnumerable<RuleInfo> rules)
+    {
+        string rulesDbHash = AnalysisSnapshotStore.ComputeFileHash(PathResolver.RulesKoJsonPath) ?? string.Empty;
+        return AnalysisSnapshotStore.ComputeSettingsHash(
+            presetId, platformXml, cStandard,
+            ProcessHelper.ParseCustomDefines(customDefines),
+            forceAllIfdefConfigs, enableClangTidy,
+            rules.Where(r => r.IsEnabled).Select(r => r.Id),
+            rulesDbHash);
+    }
+
+    private string ComputeCurrentSettingsHash()
+    {
+        if (SelectedTargetPreset == null)
+            return string.Empty;
+        return BuildSettingsHash(
+            SelectedTargetPreset.Id, SelectedTargetPreset.PlatformXml, SelectedCStandard,
+            CustomDefines, ForceAllIfdefConfigs, EnableClangTidy, AllRules);
+    }
+
+    private static List<string> EnumerateAbsoluteFiles(IEnumerable<SourceTreeNode> roots)
+        => roots.SelectMany(r => r.EnumerateFiles()).Select(f => f.FullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static List<string> ProjectRootDirs(
+        IEnumerable<SourceTreeNode> targetRoots, IEnumerable<SourceTreeNode> nonTargetRoots)
+    {
+        var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in targetRoots.Concat(nonTargetRoots))
+        {
+            string dir = r.IsDirectory ? r.FullPath : Path.GetDirectoryName(r.FullPath) ?? string.Empty;
+            if (!string.IsNullOrEmpty(dir))
+                dirs.Add(Path.GetFullPath(dir));
+        }
+        return dirs.ToList();
+    }
+
+    // 증분 계획: 설정·파일 집합이 스냅샷과 같으면 바뀐 파일만 골라낸다.
+    private static IncrementalPlan BuildIncrementalPlan(
+        TargetPreset preset,
+        string cStandard,
+        string customDefines,
+        bool forceAllIfdefConfigs,
+        bool enableClangTidy,
+        List<RuleInfo> rulesSnapshot,
+        List<SourceTreeNode> targetSnapshot,
+        AnalysisSnapshot? snapshot)
+    {
+        string settingsHash = BuildSettingsHash(
+            preset.Id, preset.PlatformXml, cStandard, customDefines,
+            forceAllIfdefConfigs, enableClangTidy, rulesSnapshot);
+        var currentFiles = EnumerateAbsoluteFiles(targetSnapshot);
+        var currentSet = currentFiles.Select(AnalysisIssue.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (snapshot == null || snapshot.Version != 1 || snapshot.SettingsHash != settingsHash
+            || !snapshot.Files.Select(f => AnalysisIssue.NormalizePath(f.FilePath)).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(currentSet))
+            return new IncrementalPlan(settingsHash, currentFiles, false, new List<string>());
+
+        var snapByNorm = snapshot.Files.ToDictionary(f => AnalysisIssue.NormalizePath(f.FilePath), StringComparer.OrdinalIgnoreCase);
+        var changedNorm = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string f in currentFiles)
+        {
+            string norm = AnalysisIssue.NormalizePath(f);
+            var saved = snapByNorm[norm];
+            string? hash = AnalysisSnapshotStore.ComputeFileHash(f);
+            long length = hash == null ? -1 : new FileInfo(f).Length;
+            if (hash == null || hash != saved.Hash || length != saved.Length)
+                changedNorm.Add(norm);
+        }
+
+        var changedExtras = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ex in snapshot.Extras ?? Enumerable.Empty<SnapshotFileResult>())
+        {
+            string? hash = AnalysisSnapshotStore.ComputeFileHash(ex.FilePath);
+            if (hash == null || hash != ex.Hash)
+                changedExtras.Add(AnalysisIssue.NormalizePath(ex.FilePath));
+        }
+
+        if (changedNorm.Count == 0 && changedExtras.Count == 0)
+            return new IncrementalPlan(settingsHash, currentFiles, true, new List<string>());
+
+        var cSources = currentSet.Where(n => IsCSourceFile(n)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var includesBySrc = snapshot.Files
+            .Where(f => IsCSourceFile(f.FilePath))
+            .ToDictionary(
+                f => AnalysisIssue.NormalizePath(f.FilePath),
+                f => f.Includes.Select(AnalysisIssue.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string norm in changedNorm)
+        {
+            affected.Add(norm);
+            if (!cSources.Contains(norm))
+            {
+                foreach (var kv in includesBySrc)
+                {
+                    if (kv.Value.Contains(norm))
+                        affected.Add(kv.Key);
+                }
+            }
+        }
+        foreach (string norm in changedExtras)
+        {
+            foreach (var kv in includesBySrc)
+            {
+                if (kv.Value.Contains(norm))
+                    affected.Add(kv.Key);
+            }
+        }
+
+        var absByNorm = currentFiles.ToDictionary(AnalysisIssue.NormalizePath, f => f, StringComparer.OrdinalIgnoreCase);
+        foreach (var ex in snapshot.Extras ?? Enumerable.Empty<SnapshotFileResult>())
+            absByNorm.TryAdd(AnalysisIssue.NormalizePath(ex.FilePath), ex.FilePath);
+        var runFiles = affected.Where(absByNorm.ContainsKey).Select(n => absByNorm[n]).ToList();
+        return new IncrementalPlan(settingsHash, currentFiles, true, runFiles);
+    }
+
+    private static AnalysisSnapshot BuildSnapshotFromResults(
+        string settingsHash,
+        List<SourceTreeNode> targetSnapshot,
+        List<SourceTreeNode> nonTargetSnapshot,
+        List<AnalysisIssue> allDefects,
+        Dictionary<string, FileLineCoverage> coverageByFile,
+        List<AnalysisIssue> notes,
+        Dictionary<string, HashSet<string>> includeMap)
+    {
+        var targetFiles = EnumerateAbsoluteFiles(targetSnapshot);
+        var targetSet = targetFiles.Select(AnalysisIssue.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rootDirs = ProjectRootDirs(targetSnapshot, nonTargetSnapshot);
+        var defectsByFile = allDefects.GroupBy(d => AnalysisIssue.NormalizePath(d.FilePath))
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        var notesByFile = notes.Where(n => !string.IsNullOrEmpty(n.FilePath))
+            .GroupBy(n => AnalysisIssue.NormalizePath(n.FilePath))
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var snapshot = new AnalysisSnapshot
+        {
+            SavedAt = DateTimeOffset.Now,
+            SettingsHash = settingsHash,
+            GlobalNotes = notes.Where(n => string.IsNullOrEmpty(n.FilePath)).Select(ToSnapshotDefect).ToList()
+        };
+
+        bool KeepReference(string absPath)
+        {
+            if (!File.Exists(absPath))
+                return false;
+            if (targetSet.Contains(AnalysisIssue.NormalizePath(absPath)))
+                return true;
+            string full = Path.GetFullPath(absPath);
+            return rootDirs.Any(d => full.StartsWith(d + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (string file in targetFiles)
+        {
+            string? hash = AnalysisSnapshotStore.ComputeFileHash(file);
+            if (hash == null)
+                continue;
+            string norm = AnalysisIssue.NormalizePath(file);
+            defectsByFile.TryGetValue(norm, out var fileDefects);
+            notesByFile.TryGetValue(norm, out var fileNotes);
+            coverageByFile.TryGetValue(norm, out var cov);
+            includeMap.TryGetValue(norm, out var refs);
+            snapshot.Files.Add(new SnapshotFileResult
+            {
+                FilePath = file,
+                Hash = hash,
+                Length = new FileInfo(file).Length,
+                Defects = (fileDefects ?? Enumerable.Empty<AnalysisIssue>()).Select(ToSnapshotDefect).ToList(),
+                Coverage = cov == null ? null : new SnapshotCoverage
+                {
+                    FilePath = cov.FilePath,
+                    Analyzed = AnalysisSnapshotStore.ToRanges(cov.AnalyzedLines),
+                    Skipped = AnalysisSnapshotStore.ToRanges(cov.SkippedLines),
+                    Directives = AnalysisSnapshotStore.ToRanges(cov.DirectiveLines)
+                },
+                Notes = (fileNotes ?? Enumerable.Empty<AnalysisIssue>()).Select(ToSnapshotDefect).ToList(),
+                Includes = (refs ?? Enumerable.Empty<string>())
+                    .Select(Path.GetFullPath).Where(KeepReference)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p).ToList()
+            });
+        }
+
+        var extraCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var refs in includeMap.Values)
+        {
+            foreach (string r in refs)
+            {
+                if (!targetSet.Contains(AnalysisIssue.NormalizePath(r)))
+                    extraCandidates.Add(r);
+            }
+        }
+        foreach (var f in extraCandidates)
+        {
+            if (!KeepReference(f))
+                continue;
+            string? hash = AnalysisSnapshotStore.ComputeFileHash(f);
+            if (hash == null)
+                continue;
+            snapshot.Extras.Add(new SnapshotFileResult
+            {
+                FilePath = f,
+                Hash = hash,
+                Length = new FileInfo(f).Length
+            });
+        }
+
+        return snapshot;
+    }
+
+    private bool IsSnapshotCurrent()
+    {
+        if (_lastSnapshot == null || SelectedTargetPreset == null)
+            return false;
+        if (_lastSnapshot.SettingsHash != ComputeCurrentSettingsHash())
+            return false;
+        var currentSet = TargetRoots.SelectMany(r => r.EnumerateFiles()).Select(f => f.FullPath)
+            .Select(AnalysisIssue.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return _lastSnapshot.Files.Select(f => AnalysisIssue.NormalizePath(f.FilePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(currentSet);
+    }
+
+    // 저장된 결과를 화면에 바로 표시하고 신선도를 보고한다.
+    private void ApplySavedAnalysis(AnalysisSnapshot? snapshot)
+    {
+        _lastSnapshot = null;
+        _loadSnapshotNotice = string.Empty;
+        if (snapshot == null || snapshot.Version != 1)
+            return;
+
+        var rulesById = AllRules.ToDictionary(r => r.Id, r => r, StringComparer.OrdinalIgnoreCase);
+        foreach (string id in snapshot.Files.SelectMany(f => f.Defects.Select(d => d.RuleId))
+            .Concat(snapshot.GlobalNotes.Select(n => n.RuleId)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!rulesById.ContainsKey(id))
+            {
+                var unregistered = RuleInfo.CreateUnregistered(id);
+                AddRule(unregistered);
+                rulesById[id] = unregistered;
+            }
+        }
+
+        _allRawDefects = snapshot.Files.SelectMany(f => f.Defects)
+            .Select(d => ToAnalysisIssue(d, rulesById)).ToList();
+        _coverageByFile = new Dictionary<string, FileLineCoverage>();
+        foreach (var f in snapshot.Files)
+        {
+            if (f.Coverage == null)
+                continue;
+            _coverageByFile[AnalysisIssue.NormalizePath(f.Coverage.FilePath)] = new FileLineCoverage
+            {
+                FilePath = f.Coverage.FilePath,
+                AnalyzedLines = AnalysisSnapshotStore.FromRanges(f.Coverage.Analyzed),
+                SkippedLines = AnalysisSnapshotStore.FromRanges(f.Coverage.Skipped),
+                DirectiveLines = AnalysisSnapshotStore.FromRanges(f.Coverage.Directives)
+            };
+        }
+
+        NotesAndInfos.Clear();
+        foreach (var n in snapshot.GlobalNotes.Select(n => ToAnalysisIssue(n, rulesById)))
+            NotesAndInfos.Add(n);
+        foreach (var n in snapshot.Files.SelectMany(f => f.Notes).Select(n => ToAnalysisIssue(n, rulesById)))
+            NotesAndInfos.Add(n);
+
+        _lastSnapshot = snapshot;
+        RefreshFilteredDefects();
+        UpdateTreeDefectBadges();
+
+        int changedCount = 0;
+        foreach (var f in snapshot.Files.Concat(snapshot.Extras ?? Enumerable.Empty<SnapshotFileResult>()))
+        {
+            string? hash = AnalysisSnapshotStore.ComputeFileHash(f.FilePath);
+            if (hash == null || hash != f.Hash)
+                changedCount++;
+        }
+        _loadSnapshotNotice = " · 저장된 분석 결과를 표시합니다.";
+        if (changedCount > 0)
+            _loadSnapshotNotice += $" {changedCount}개 파일이 바뀌어 [정적 분석 시작]으로 다시 분석하십시오.";
+    }
+
+    private string BuildProjectLoadedMessage(string filePath)
+    {
+        string message = $"프로젝트 불러오기 완료: {filePath}{_loadSnapshotNotice}";
+        if (_loadReanchored > 0 || _loadNeedsReview > 0)
+        {
+            message += $" (예외 위치 재고정 {_loadReanchored}건";
+            if (_loadNeedsReview > 0)
+                message += $", 확인 필요 {_loadNeedsReview}건";
+            message += ")";
+        }
+        return message;
+    }
+
     public void SaveProjectToFile(string filePath)
     {
         var targetRootPaths = TargetRoots.Select(r => r.FullPath).ToList();
@@ -957,7 +1444,8 @@ public class MainViewModel : INotifyPropertyChanged
             ExcludedNonTargetPaths = _excludedNonTargetSubpaths.Where(p => IsUnderAnyRoot(p, nonTargetRootPaths)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList(),
             EnabledRuleIds = AllRules.Where(r => r.IsEnabled).Select(r => r.Id).ToList(),
             DisabledRuleIds = AllRules.Where(r => !r.IsEnabled).Select(r => r.Id).ToList(),
-            SuppressedIssues = SuppressedIssues.ToList()
+            SuppressedIssues = SuppressedIssues.ToList(),
+            SavedAnalysis = IsSnapshotCurrent() ? _lastSnapshot : null
         };
 
         try
@@ -1060,12 +1548,15 @@ public class MainViewModel : INotifyPropertyChanged
         foreach (var s in model.SuppressedIssues)
             SuppressedIssues.Add(s);
 
+        ReanchorSuppressionsOnLoad();
+        ApplySavedAnalysis(model.SavedAnalysis);
+
         var firstFile = TargetRoots.SelectMany(r => r.EnumerateFiles()).FirstOrDefault();
         if (firstFile != null)
             LoadFileIntoCodeViewer(firstFile.FullPath);
 
         NotifyCountsChanged();
-        StatusMessage = $"프로젝트 불러오기 완료: {filePath}";
+        StatusMessage = BuildProjectLoadedMessage(filePath);
     }
 
     public void AddRecentProject(string filePath)
