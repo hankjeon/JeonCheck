@@ -31,7 +31,9 @@
     <Compile Include="../JeonCheck/Services/ExternalEditorLauncher.cs" Link="Services/ExternalEditorLauncher.cs" />
     <Compile Include="../JeonCheck/Services/SourceFileEncoding.cs" Link="Services/SourceFileEncoding.cs" />
     <Compile Include="../JeonCheck/Services/CCodeHighlighter.cs" Link="Services/CCodeHighlighter.cs" />
+    <Compile Include="../JeonCheck/Services/CCodePrettifier.cs" Link="Services/CCodePrettifier.cs" />
     <Compile Include="../JeonCheck/Services/AnalysisSnapshotStore.cs" Link="Services/AnalysisSnapshotStore.cs" />
+    <Compile Include="../JeonCheck/Services/SymbolTooltipBuilder.cs" Link="Services/SymbolTooltipBuilder.cs" />
     <None Include="../../data/rules_ko.json" Link="rules_ko.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

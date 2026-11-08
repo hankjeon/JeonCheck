@@ -112,6 +112,44 @@ Test("dump XML 파싱 후 캐스트 대입 검사", () =>
     finally { File.Delete(path); }
 });
 
+Test("다중 파일 병렬 분석(Cppcheck -j, dump 해석, Clang-Tidy) 결과 일관성 및 산출물 정리", () =>
+{
+    string dir = Path.Combine(Path.GetTempPath(), "jc_parallel_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        string fileA = Path.Combine(dir, "a.c");
+        string fileB = Path.Combine(dir, "b.c");
+        File.WriteAllText(fileA, "int fa(int x) {\n    int arr[2] = {1, 2};\n    short s = x;\n    goto done;\ndone:\n    return arr[3] + s;\n}\n");
+        File.WriteAllText(fileB, "int fb(int y) {\n    if (y == 0) {\n        return 1;\n    } else {\n        return 1;\n    }\n}\n");
+
+        var repo = new DataRepository();
+        var preset = repo.LoadTargetPresets().First();
+        var rules = repo.LoadRules();
+        var targetNodes = new List<SourceTreeNode>
+        {
+            new() { Name = "a.c", FullPath = fileA, IsDirectory = false },
+            new() { Name = "b.c", FullPath = fileB, IsDirectory = false }
+        };
+
+        var runner = new CppcheckRunner();
+        var r1 = runner.RunAnalysisAsync(preset, "c99", "", false, true, targetNodes, Array.Empty<SourceTreeNode>(), rules).GetAwaiter().GetResult();
+        var r2 = runner.RunAnalysisAsync(preset, "c99", "", false, true, targetNodes, Array.Empty<SourceTreeNode>(), rules).GetAwaiter().GetResult();
+
+        if (!r1.Defects.Any(d => d.RuleId == "arrayIndexOutOfBounds")) throw new Exception("Cppcheck arrayIndexOutOfBounds 미검출");
+        if (!r1.Defects.Any(d => d.RuleId == "implicitNarrowing")) throw new Exception("자체 검사 implicitNarrowing 미검출");
+        if (!r1.Defects.Any(d => d.RuleId == "misra-c2012-15.1")) throw new Exception("MISRA 15.1(goto) 미검출");
+        if (!r1.Defects.Any(d => d.RuleId == "bugprone-branch-clone")) throw new Exception("Clang-Tidy bugprone-branch-clone 미검출");
+        if (r1.CoverageByFile.Count < 2) throw new Exception("다중 파일 라인 커버리지 누락");
+
+        var keys1 = r1.Defects.Select(d => $"{d.RuleId}|{d.FileName}|{d.Line}:{d.Column}").ToList();
+        var keys2 = r2.Defects.Select(d => $"{d.RuleId}|{d.FileName}|{d.Line}:{d.Column}").ToList();
+        if (!keys1.SequenceEqual(keys2)) throw new Exception("반복 병렬 실행 간 결과 순서/집합 불일치");
+        if (Directory.GetFiles(dir, "*.dump").Length != 0) throw new Exception(".dump 파일 미정리");
+    }
+    finally { Directory.Delete(dir, true); }
+});
+
 DescriptionTests.Run(Test);
 SourceFileEncodingTests.Run(Test);
 CodeHighlightTests.Run(Test);

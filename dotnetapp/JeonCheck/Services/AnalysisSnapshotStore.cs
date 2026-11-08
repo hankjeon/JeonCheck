@@ -157,7 +157,8 @@ public static class AnalysisSnapshotStore
         List<AnalysisIssue> notesAndInfos,
         ISet<string> replacedNormPaths,
         AnalysisRunResult fresh,
-        bool replaceGlobalNotes)
+        bool replaceGlobalNotes,
+        Dictionary<string, List<Models.SnapshotSymbol>>? symbolsByFile = null)
     {
         allDefects.RemoveAll(d => replacedNormPaths.Contains(AnalysisIssue.NormalizePath(d.FilePath)));
         var keptKeys = new HashSet<string>(allDefects.Select(d =>
@@ -195,6 +196,14 @@ public static class AnalysisSnapshotStore
                 if (!notesAndInfos.Any(x => string.IsNullOrEmpty(x.FilePath) && x.RuleId == g.RuleId && x.Message == g.Message))
                     notesAndInfos.Add(g);
             }
+        }
+
+        if (symbolsByFile != null)
+        {
+            foreach (string key in replacedNormPaths)
+                symbolsByFile.Remove(key);
+            foreach (var kvp in fresh.SymbolsByFile)
+                symbolsByFile[kvp.Key] = kvp.Value;
         }
     }
 }

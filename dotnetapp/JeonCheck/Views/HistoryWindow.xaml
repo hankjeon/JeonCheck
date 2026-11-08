@@ -1,0 +1,68 @@
+<Window x:Class="JeonCheck.Views.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="히스토리"
+        Width="560"
+        SizeToContent="Height"
+        MaxHeight="620"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#1E1E1E"
+        Foreground="#E6EDF3"
+        FontFamily="Malgun Gothic"
+        FontSize="12.5">
+    <Border Padding="20,18,20,16" BorderBrush="#3E3E42" BorderThickness="1">
+        <StackPanel>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
+                <TextBlock Text="히스토리" FontSize="18" FontWeight="Bold" Foreground="#58A6FF" />
+                <Border Background="#2D333B" CornerRadius="4" Padding="6,1" Margin="8,2,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="VersionBadge" FontSize="11" Foreground="#9DA7B3" FontWeight="SemiBold" />
+                </Border>
+            </StackPanel>
+            <TextBlock Text="첫째 자리: 별도 결정 시 올림 · 둘째 자리: 기능 추가 · 셋째 자리: UI·문구 수정"
+                       Foreground="#8B949E" FontSize="11.5" Margin="0,0,0,12" TextWrapping="Wrap" />
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420">
+                <ItemsControl x:Name="HistoryList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#252526" BorderBrush="#333337" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Version}" FontSize="14" FontWeight="Bold" Foreground="#E6EDF3" Margin="0,0,0,6" />
+                                    <TextBlock Text="추가" Foreground="#3FB950" FontWeight="SemiBold" Margin="0,0,0,2"
+                                               Visibility="{Binding HasAdded, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <ItemsControl ItemsSource="{Binding Added}" Margin="0,0,0,6"
+                                                  Visibility="{Binding HasAdded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" Foreground="#D0D7DE" TextWrapping="Wrap" Margin="12,0,0,2" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="수정" Foreground="#D29922" FontWeight="SemiBold" Margin="0,0,0,2"
+                                               Visibility="{Binding HasChanged, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <ItemsControl ItemsSource="{Binding Changed}"
+                                                  Visibility="{Binding HasChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" Foreground="#D0D7DE" TextWrapping="Wrap" Margin="12,0,0,2" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <Button Content="닫기"
+                    Width="84"
+                    HorizontalAlignment="Right"
+                    IsDefault="True"
+                    IsCancel="True"
+                    Style="{StaticResource DarkButtonStyle}"
+                    Click="CloseButton_Click" />
+        </StackPanel>
+    </Border>
+</Window>

@@ -62,6 +62,24 @@ public class SnapshotCoverage
     public List<SnapshotLineRange> Directives { get; set; } = new();
 }
 
+public class SnapshotSymbol
+{
+    [JsonPropertyName("filePath")]
+    public string FilePath { get; set; } = string.Empty;
+
+    [JsonPropertyName("line")]
+    public int Line { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty; // function, variable, macro
+
+    [JsonPropertyName("tooltip")]
+    public string Tooltip { get; set; } = string.Empty;
+}
+
 public class SnapshotFileResult
 {
     [JsonPropertyName("filePath")]
@@ -81,6 +99,10 @@ public class SnapshotFileResult
 
     [JsonPropertyName("notes")]
     public List<SnapshotDefect> Notes { get; set; } = new();
+
+    // 코드 뷰어 호버 팝업용 심볼(함수·변수·매크로). 없으면 해당 줄·이름에 팝업을 표시하지 않는다.
+    [JsonPropertyName("symbols")]
+    public List<SnapshotSymbol> Symbols { get; set; } = new();
 
     // 이 소스를 해석할 때 함께 읽은 헤더(덤프 토큰에 등장한 다른 파일). 헤더 변경 시 영향 범위 계산용.
     [JsonPropertyName("includes")]

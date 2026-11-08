@@ -142,7 +142,15 @@ public class DataRepository
         Defects = f.Defects.Select(d => CloneSnapshotDefectToStored(d, baseDir)).ToList(),
         Coverage = f.Coverage == null ? null : CloneSnapshotCoverageToStored(f.Coverage, baseDir),
         Notes = f.Notes.Select(d => CloneSnapshotDefectToStored(d, baseDir)).ToList(),
-        Includes = f.Includes.Select(p => ToStoredPath(p, baseDir)).ToList()
+        Includes = f.Includes.Select(p => ToStoredPath(p, baseDir)).ToList(),
+        Symbols = f.Symbols.Select(s => new SnapshotSymbol
+        {
+            FilePath = ToStoredPath(s.FilePath, baseDir),
+            Line = s.Line,
+            Name = s.Name,
+            Kind = s.Kind,
+            Tooltip = s.Tooltip
+        }).ToList()
     };
 
     private static AnalysisSnapshot? CloneSnapshotToStored(AnalysisSnapshot? snapshot, string? baseDir)
@@ -171,6 +179,8 @@ public class DataRepository
                 d.FilePath = ToResolvedPath(d.FilePath, baseDir);
             for (int i = 0; i < f.Includes.Count; i++)
                 f.Includes[i] = ToResolvedPath(f.Includes[i], baseDir);
+            foreach (var s in f.Symbols)
+                s.FilePath = ToResolvedPath(s.FilePath, baseDir);
         }
         foreach (var g in snapshot.GlobalNotes)
             g.FilePath = ToResolvedPath(g.FilePath, baseDir);

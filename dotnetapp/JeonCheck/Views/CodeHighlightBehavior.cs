@@ -44,6 +44,11 @@ public static class CodeHighlightBehavior
                 }
                 run.Foreground = brush;
             }
+            if (span.IsItalic)
+                run.FontStyle = FontStyles.Italic;
+            // HoverTip이 null이면 팝업을 표시하지 않는다.
+            if (!string.IsNullOrEmpty(span.HoverTip))
+                ToolTipService.SetToolTip(run, span.HoverTip);
             textBlock.Inlines.Add(run);
         }
     }

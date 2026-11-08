@@ -25,6 +25,7 @@ public class MainViewModel : INotifyPropertyChanged
     private string _currentCodeFilePath = string.Empty;
     private string _currentFileEncodingName = "UTF-8";
     private bool _fileEncodingPinned;
+    private bool _isPrettifyEnabled;
     private string _codeStatsSummary = "파일을 선택하면 라인별 검사 상태가 표시됩니다.";
     private AnalysisIssue? _selectedIssue;
     private string _defectSearchText = string.Empty;
@@ -35,6 +36,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     private List<AnalysisIssue> _allRawDefects = new();
     private Dictionary<string, FileLineCoverage> _coverageByFile = new();
+    private Dictionary<string, List<SnapshotSymbol>> _symbolsByFile = new(StringComparer.OrdinalIgnoreCase);
     private AnalysisSnapshot? _lastSnapshot;
     private string _loadSnapshotNotice = string.Empty;
     private int _loadReanchored;
@@ -204,6 +206,31 @@ public class MainViewModel : INotifyPropertyChanged
             }
         }
         ReloadFileWithEncoding(names[(index + 1) % names.Count]);
+    }
+
+    public bool IsPrettifyEnabled
+    {
+        get => _isPrettifyEnabled;
+        set
+        {
+            if (_isPrettifyEnabled != value)
+            {
+                _isPrettifyEnabled = value;
+                OnPropertyChanged();
+                if (!string.IsNullOrWhiteSpace(CurrentCodeFilePath) && File.Exists(CurrentCodeFilePath))
+                {
+                    LoadFileIntoCodeViewer(CurrentCodeFilePath);
+                }
+                StatusMessage = _isPrettifyEnabled
+                    ? "Prettify 켜짐: 원본 파일과 줄 번호를 유지한 채 들여쓰기를 자동 정렬하여 표시합니다."
+                    : "Prettify 꺼짐: 원본 파일의 들여쓰기 그대로 표시합니다.";
+            }
+        }
+    }
+
+    public void TogglePrettify()
+    {
+        IsPrettifyEnabled = !IsPrettifyEnabled;
     }
 
     public AnalysisIssue? SelectedIssue
@@ -405,6 +432,7 @@ public class MainViewModel : INotifyPropertyChanged
         _allRawDefects.Clear();
         _lastSnapshot = null;
         _coverageByFile.Clear();
+        _symbolsByFile.Clear();
         FilteredDefects.Clear();
         RuleIssueGroups.Clear();
         NotesAndInfos.Clear();
@@ -643,9 +671,12 @@ public class MainViewModel : INotifyPropertyChanged
                 var replacedNormPaths = new HashSet<string>(
                     incrementalPlan.RunFiles.Select(AnalysisIssue.NormalizePath).Concat(runResult.CoverageByFile.Keys),
                     StringComparer.OrdinalIgnoreCase);
+                foreach (var symKey in runResult.SymbolsByFile.Keys)
+                    replacedNormPaths.Add(symKey);
                 var mergedNotes = NotesAndInfos.ToList();
                 AnalysisSnapshotStore.ReplaceFileResults(
-                    _allRawDefects, _coverageByFile, mergedNotes, replacedNormPaths, runResult, replaceGlobalNotes: false);
+                    _allRawDefects, _coverageByFile, mergedNotes, replacedNormPaths, runResult, replaceGlobalNotes: false,
+                    _symbolsByFile);
                 NotesAndInfos.Clear();
                 foreach (var mergedNote in mergedNotes)
                     NotesAndInfos.Add(mergedNote);
@@ -654,6 +685,7 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 _allRawDefects = runResult.Defects;
                 _coverageByFile = runResult.CoverageByFile;
+                _symbolsByFile = new Dictionary<string, List<SnapshotSymbol>>(runResult.SymbolsByFile, StringComparer.OrdinalIgnoreCase);
 
                 NotesAndInfos.Clear();
                 foreach (var n in runResult.NotesAndInfos)
@@ -667,7 +699,8 @@ public class MainViewModel : INotifyPropertyChanged
                 _allRawDefects,
                 _coverageByFile,
                 NotesAndInfos.ToList(),
-                runResult.IncludeMapByFile);
+                runResult.IncludeMapByFile,
+                _symbolsByFile);
 
             RefreshFilteredDefects();
             UpdateTreeDefectBadges();
@@ -748,6 +781,7 @@ public class MainViewModel : INotifyPropertyChanged
         _fileEncodingPinned = requestedEncoding != null;
         CurrentFileEncodingName = decodedFile.EncodingName;
         string[] rawLines = decodedFile.Lines;
+        string[] displayLines = _isPrettifyEnabled ? CCodePrettifier.PrettifyLines(rawLines) : rawLines;
         string normKey = AnalysisIssue.NormalizePath(CurrentCodeFilePath);
 
         _coverageByFile.TryGetValue(normKey, out var coverage);
@@ -772,11 +806,11 @@ public class MainViewModel : INotifyPropertyChanged
         int defectLineCount = 0;
         int suppressedLineCount = 0;
 
-                bool inBlockComment = false;
+        bool inBlockComment = false;
         for (int i = 0; i < rawLines.Length; i++)
         {
             int lineNum = i + 1;
-            string text = rawLines[i];
+            string text = displayLines[i];
             var lineVm = new CodeLineViewModel
             {
                 LineNumber = lineNum,
@@ -832,8 +866,9 @@ public class MainViewModel : INotifyPropertyChanged
             }
 
                         var highlightSpans = CCodeHighlighter.TokenizeLine(text, ref inBlockComment);
+            highlightSpans = AttachSymbolHover(highlightSpans, normKey, lineNum);
             lineVm.HighlightSpans = lineVm.Status is CodeLineStatus.Skipped or CodeLineStatus.Suppressed
-                ? highlightSpans.Select(s => new CodeSegment(s.Text, null)).ToList()
+                ? highlightSpans.Select(s => new CodeSegment(s.Text, null, s.IsItalic, s.HoverTip)).ToList()
                 : highlightSpans;
             CurrentFileLines.Add(lineVm);
         }
@@ -850,6 +885,64 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         CodeLinesReloaded?.Invoke();
+    }
+
+    // 코드 토큰에 심볼 호버 툴팁을 붙인다. 정보가 없는 이름은 툴팁 없음(팝업 없음).
+    private List<CodeSegment> AttachSymbolHover(List<CodeSegment> spans, string normKey, int lineNum)
+    {
+        if (!_symbolsByFile.TryGetValue(normKey, out var list) || list.Count == 0)
+            return spans;
+
+        Dictionary<string, string>? byName = null;
+        foreach (var sym in list)
+        {
+            if (sym.Line != lineNum || string.IsNullOrEmpty(sym.Name) || string.IsNullOrEmpty(sym.Tooltip))
+                continue;
+            byName ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            byName.TryAdd(sym.Name, sym.Tooltip);
+        }
+        if (byName == null || byName.Count == 0)
+            return spans;
+
+        // 전처리기 한 줄(#define 등)은 단일 스팬이다. 정의된 매크로명이 있으면 줄 전체에 정의를 표시한다.
+        if (spans.Count == 1 && spans[0].ForegroundHex == CCodeHighlighter.PreprocessorHex)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(spans[0].Text, @"#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)");
+            if (m.Success && byName.TryGetValue(m.Groups[1].Value, out var macroTip))
+                return new List<CodeSegment> { new CodeSegment(spans[0].Text, spans[0].ForegroundHex, spans[0].IsItalic, macroTip) };
+            return spans;
+        }
+
+        bool changed = false;
+        var attached = new List<CodeSegment>(spans.Count);
+        foreach (var span in spans)
+        {
+            if (span.ForegroundHex == null && span.HoverTip == null &&
+                IsHoverIdentifier(span.Text) && byName.TryGetValue(span.Text, out var tip))
+            {
+                attached.Add(new CodeSegment(span.Text, span.ForegroundHex, span.IsItalic, tip));
+                changed = true;
+            }
+            else
+            {
+                attached.Add(span);
+            }
+        }
+        return changed ? attached : spans;
+    }
+
+    private static bool IsHoverIdentifier(string s)
+    {
+        if (string.IsNullOrEmpty(s))
+            return false;
+        if (!(s[0] == '_' || char.IsLetter(s[0])))
+            return false;
+        for (int i = 1; i < s.Length; i++)
+        {
+            if (!(s[i] == '_' || char.IsLetterOrDigit(s[i])))
+                return false;
+        }
+        return true;
     }
 
     public event Action? CodeLinesReloaded;
@@ -1256,7 +1349,8 @@ public class MainViewModel : INotifyPropertyChanged
         List<AnalysisIssue> allDefects,
         Dictionary<string, FileLineCoverage> coverageByFile,
         List<AnalysisIssue> notes,
-        Dictionary<string, HashSet<string>> includeMap)
+        Dictionary<string, HashSet<string>> includeMap,
+        Dictionary<string, List<SnapshotSymbol>>? symbolsByFile = null)
     {
         var targetFiles = EnumerateAbsoluteFiles(targetSnapshot);
         var targetSet = targetFiles.Select(AnalysisIssue.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1294,6 +1388,8 @@ public class MainViewModel : INotifyPropertyChanged
             notesByFile.TryGetValue(norm, out var fileNotes);
             coverageByFile.TryGetValue(norm, out var cov);
             includeMap.TryGetValue(norm, out var refs);
+            List<SnapshotSymbol>? fileSymbols = null;
+            symbolsByFile?.TryGetValue(norm, out fileSymbols);
             snapshot.Files.Add(new SnapshotFileResult
             {
                 FilePath = file,
@@ -1310,7 +1406,15 @@ public class MainViewModel : INotifyPropertyChanged
                 Notes = (fileNotes ?? Enumerable.Empty<AnalysisIssue>()).Select(ToSnapshotDefect).ToList(),
                 Includes = (refs ?? Enumerable.Empty<string>())
                     .Select(Path.GetFullPath).Where(KeepReference)
-                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p).ToList()
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p).ToList(),
+                Symbols = (fileSymbols ?? Enumerable.Empty<SnapshotSymbol>()).Select(s => new SnapshotSymbol
+                {
+                    FilePath = s.FilePath,
+                    Line = s.Line,
+                    Name = s.Name,
+                    Kind = s.Kind,
+                    Tooltip = s.Tooltip
+                }).ToList()
             });
         }
 
@@ -1376,6 +1480,7 @@ public class MainViewModel : INotifyPropertyChanged
         _allRawDefects = snapshot.Files.SelectMany(f => f.Defects)
             .Select(d => ToAnalysisIssue(d, rulesById)).ToList();
         _coverageByFile = new Dictionary<string, FileLineCoverage>();
+        _symbolsByFile = new Dictionary<string, List<SnapshotSymbol>>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in snapshot.Files)
         {
             if (f.Coverage == null)
@@ -1387,6 +1492,19 @@ public class MainViewModel : INotifyPropertyChanged
                 SkippedLines = AnalysisSnapshotStore.FromRanges(f.Coverage.Skipped),
                 DirectiveLines = AnalysisSnapshotStore.FromRanges(f.Coverage.Directives)
             };
+        }
+        foreach (var f in snapshot.Files)
+        {
+            if (f.Symbols == null || f.Symbols.Count == 0)
+                continue;
+            _symbolsByFile[AnalysisIssue.NormalizePath(f.FilePath)] = f.Symbols.Select(s => new SnapshotSymbol
+            {
+                FilePath = s.FilePath,
+                Line = s.Line,
+                Name = s.Name,
+                Kind = s.Kind,
+                Tooltip = s.Tooltip
+            }).ToList();
         }
 
         NotesAndInfos.Clear();

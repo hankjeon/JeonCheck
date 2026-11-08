@@ -16,6 +16,9 @@ public class AnalysisRunResult
     public Dictionary<string, FileLineCoverage> CoverageByFile { get; set; } = new();
     public string CommandLineSummary { get; set; } = string.Empty;
 
+    // 코드 뷰어 호버 팝업용 심볼 (정규화 경로 -> 심볼 목록). 정보가 없는 이름은 항목 없음.
+    public Dictionary<string, List<Models.SnapshotSymbol>> SymbolsByFile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     // .dump 해석 중 수집한 소스별 참조 파일(포함 헤더). 키·값 모두 정규화 경로.
     public Dictionary<string, HashSet<string>> IncludeMapByFile { get; set; } = new();
 }
@@ -130,12 +133,14 @@ public class CppcheckRunner
         var rulesById = allRules.ToDictionary(r => r.Id, r => r, StringComparer.OrdinalIgnoreCase);
 
         // 2. Cppcheck 공통 명령행 인자 구성 (입력 파일은 분석 단계별로 추가)
+        int jobCount = Math.Max(1, Environment.ProcessorCount);
         var baseArgs = new List<string>
         {
             "--enable=all",
             "--inconclusive",
             // 가능한 많은 결함을 검출하기 위해 분기·조건식 분석 제한 없이 전체 분석 (분석 시간은 늘어남)
             "--check-level=exhaustive",
+            $"-j{jobCount}",
             "--xml",
             "--dump",
             $"--std={cStandard}"
@@ -237,7 +242,7 @@ public class CppcheckRunner
                     {
                         double ratio = totalCount > 0 ? (double)doneCount / totalCount : 1.0;
                         double pct = clangStartPct + (clangSpan * ratio);
-                        int displayIdx = Math.Min(doneCount + 1, totalCount);
+                        int displayIdx = Math.Clamp(doneCount, 1, totalCount);
                         progress?.Report(new AnalysisProgressInfo(
                             pct,
                             $"Clang-Tidy 심층 분석 중 ({displayIdx}/{totalCount}): {fileName}"));
@@ -388,20 +393,94 @@ public class CppcheckRunner
         }
 
         // 5. 생성된 .dump 파일 해석 (MISRA 검사 + 라인별 검사 완료 / 미검사 판별 + 자체 타입 변환 검사)
+        //    파일별 .dump XML 파싱·MISRA 검사·타입 변환 검사는 CPU 코어 수만큼 병렬로 수행하고,
+        //    결과 병합(중복 제거·커버리지·노트)은 입력 파일 순서대로 직렬 반영하여 결정론적 결과를 보장한다.
         double dumpSpan = endPct - cppcheckExecEndPct;
+        var dumpResults = new DumpPassItemResult[inputFiles.Count];
+        for (int i = 0; i < inputFiles.Count; i++)
+        {
+            string dumpFile = inputFiles[i] + ".dump";
+            dumpResults[i] = new DumpPassItemResult
+            {
+                DumpExists = dumpGuard.IsGeneratedByThisRun(dumpFile)
+            };
+        }
+
+        int completedDumps = 0;
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount),
+            CancellationToken = cancellationToken
+        };
+
+        Parallel.For(0, inputFiles.Count, parallelOptions, i =>
+        {
+            var item = dumpResults[i];
+            string srcFile = inputFiles[i];
+            string srcName = Path.GetFileName(srcFile);
+
+            if (item.DumpExists)
+            {
+                string dumpFile = srcFile + ".dump";
+
+                // MISRA C 2012: Cppcheck 2.22 원본 misra.py를 C#으로 옮긴 검사기
+                item.MisraResult = Misra.MisraChecker.CheckDump(dumpFile);
+
+                try
+                {
+                    var dumpDoc = _dumpParser.Parse(dumpFile);
+                    item.DumpDoc = dumpDoc;
+
+                    try
+                    {
+                        item.Symbols = SymbolTooltipBuilder.Build(dumpDoc);
+                    }
+                    catch
+                    {
+                        item.Symbols = new Dictionary<string, List<Models.SnapshotSymbol>>(StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    if (includeMap != null)
+                    {
+                        string srcNorm = AnalysisIssue.NormalizePath(srcFile);
+                        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var cfgUnit in dumpDoc.Configurations)
+                        {
+                            foreach (var tok in cfgUnit.Tokens)
+                            {
+                                if (!string.IsNullOrEmpty(tok.File))
+                                    referenced.Add(AnalysisIssue.NormalizePath(tok.File));
+                            }
+                        }
+                        referenced.Remove(srcNorm);
+                        item.ReferencedHeaders = referenced;
+                    }
+
+                    // 자체 타입 변환 검사 (implicitNarrowing, implicitSignConversion, explicitNarrowingCast, pointerSizeMismatch)
+                    item.TypeIssues = _typeAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
+                }
+                catch (Exception ex)
+                {
+                    item.DumpParseError = ex;
+                }
+            }
+
+            int done = Interlocked.Increment(ref completedDumps);
+            double dumpRatio = (double)done / inputFiles.Count;
+            progress?.Report(new AnalysisProgressInfo(
+                cppcheckExecEndPct + (dumpSpan * dumpRatio),
+                $"AST 및 MISRA 정밀 분석 중 ({done}/{inputFiles.Count}): {srcName}"));
+        });
+
         for (int i = 0; i < inputFiles.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             string srcFile = inputFiles[i];
             string srcName = Path.GetFileName(srcFile);
-            double dumpRatio = (double)(i + 1) / inputFiles.Count;
-            progress?.Report(new AnalysisProgressInfo(
-                cppcheckExecEndPct + (dumpSpan * dumpRatio),
-                $"AST 및 MISRA 정밀 분석 중 ({i + 1}/{inputFiles.Count}): {srcName}"));
+            var item = dumpResults[i];
 
-            string dumpFile = srcFile + ".dump";
-            if (!dumpGuard.IsGeneratedByThisRun(dumpFile))
+            if (!item.DumpExists)
             {
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpMissing",
@@ -411,44 +490,29 @@ public class CppcheckRunner
                 continue;
             }
 
-            // MISRA C 2012: Cppcheck 2.22 원본 misra.py를 C#으로 옮긴 검사기 (원본과 같은 위치·규칙으로 보고).
-            // 원본처럼 아래 라인 커버리지·자체 검사의 dump 해석과는 독립적으로 실행한다.
-            AddMisraViolations(cppcheckExe, dumpFile, srcFile, srcName, targetFilesNormalized, rulesById, result, keys);
-
-            DumpDocument dumpDoc;
-            try
+            if (item.MisraResult != null)
             {
-                dumpDoc = _dumpParser.Parse(dumpFile);
+                AddMisraViolations(cppcheckExe, item.MisraResult, srcFile, srcName, targetFilesNormalized, rulesById, result, keys);
             }
-            catch (Exception ex)
+
+            if (item.DumpParseError != null || item.DumpDoc == null)
             {
                 result.NotesAndInfos.Add(CreateNote(
                     "dumpParseError",
                     "AST 덤프 파일 해석 실패",
-                    $"[분석 범위 안내] '{srcName}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 축소 변환 검사를 건너뛰었습니다. ({ex.Message})",
+                    $"[분석 범위 안내] '{srcName}'의 AST 덤프 파일을 해석하지 못해 라인별 검사 상태 표시와 축소 변환 검사를 건너뛰었습니다. ({item.DumpParseError?.Message})",
                     srcFile));
                 continue;
             }
 
-            // 이 .dump를 해석하며 읽은 참조 파일(포함 헤더) 수집. 헤더 변경 시 영향 범위 계산용.
-        if (includeMap != null)
-        {
-            string srcNorm = AnalysisIssue.NormalizePath(srcFile);
-            var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var cfgUnit in dumpDoc.Configurations)
+            if (includeMap != null && item.ReferencedHeaders != null)
             {
-                foreach (var tok in cfgUnit.Tokens)
-                {
-                    if (!string.IsNullOrEmpty(tok.File))
-                        referenced.Add(AnalysisIssue.NormalizePath(tok.File));
-                }
+                string srcNorm = AnalysisIssue.NormalizePath(srcFile);
+                includeMap[srcNorm] = item.ReferencedHeaders;
             }
-            referenced.Remove(srcNorm);
-            includeMap[srcNorm] = referenced;
-        }
 
-        // 라인별 커버리지 병합
-            foreach (var kvp in dumpDoc.CoverageByFile)
+            // 라인별 커버리지 병합
+            foreach (var kvp in item.DumpDoc.CoverageByFile)
             {
                 if (!result.CoverageByFile.TryGetValue(kvp.Key, out var existingCov))
                 {
@@ -467,19 +531,52 @@ public class CppcheckRunner
                 }
             }
 
-            // 자체 타입 변환 검사 (implicitNarrowing, implicitSignConversion, explicitNarrowingCast, pointerSizeMismatch)
-            var astIssues = _typeAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
-            foreach (var issue in astIssues)
+            // 호버 심볼 병합 (같은 파일·줄·이름은 첫 항목 유지)
+            if (item.Symbols != null)
             {
-                if (keys.TryAdd(issue.RuleId, issue.FilePath, issue.Line, issue.Column))
-                    result.Defects.Add(issue);
+                foreach (var kvp in item.Symbols)
+                {
+                    if (!result.SymbolsByFile.TryGetValue(kvp.Key, out var existing))
+                    {
+                        result.SymbolsByFile[kvp.Key] = kvp.Value;
+                    }
+                    else
+                    {
+                        var seen = new HashSet<string>(existing.Select(s => $"{s.Line}\n{s.Name}"), StringComparer.Ordinal);
+                        foreach (var sym in kvp.Value)
+                        {
+                            if (seen.Add($"{sym.Line}\n{sym.Name}"))
+                                existing.Add(sym);
+                        }
+                    }
+                }
+            }
+
+            if (item.TypeIssues != null)
+            {
+                foreach (var issue in item.TypeIssues)
+                {
+                    if (keys.TryAdd(issue.RuleId, issue.FilePath, issue.Line, issue.Column))
+                        result.Defects.Add(issue);
+                }
             }
         }
     }
 
+    private sealed class DumpPassItemResult
+    {
+        public bool DumpExists { get; init; }
+        public Misra.MisraResult? MisraResult { get; set; }
+        public DumpDocument? DumpDoc { get; set; }
+        public Dictionary<string, List<Models.SnapshotSymbol>>? Symbols { get; set; }
+        public Exception? DumpParseError { get; set; }
+        public HashSet<string>? ReferencedHeaders { get; set; }
+        public List<AnalysisIssue>? TypeIssues { get; set; }
+    }
+
     private static void AddMisraViolations(
         string cppcheckExe,
-        string dumpFile,
+        Misra.MisraResult misra,
         string srcFile,
         string srcName,
         HashSet<string> targetFilesNormalized,
@@ -487,7 +584,6 @@ public class CppcheckRunner
         AnalysisRunResult result,
         DedupKeys keys)
     {
-        var misra = Misra.MisraChecker.CheckDump(dumpFile);
         if (misra.Error != null && misra.Violations.Count == 0)
         {
             // 원본 misra.py가 실패해 위반을 하나도 내지 못한 경우와 같은 안내

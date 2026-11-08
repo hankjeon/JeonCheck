@@ -47,95 +47,117 @@ public class ClangTidyRunner
                 : "armv7r-none-eabi";
             string builtinInc = PathResolver.ClangTidyIncludeDirectory;
             string workingDir = Path.GetDirectoryName(clangTidyExe) ?? PathResolver.RootDirectory;
+            bool hasBuiltinInc = Directory.Exists(builtinInc);
+            var parsedCustomDefines = string.IsNullOrWhiteSpace(customDefines)
+                ? new List<string>()
+                : ProcessHelper.ParseCustomDefines(customDefines);
 
-            var failedFiles = new List<(string FileName, int ExitCode, string Summary)>();
+            // 파일별 Clang-Tidy 프로세스를 CPU 코어 수만큼 병렬로 실행하고,
+            // 완료 후 입력 파일 순서대로 파싱·중복 제거를 수행하여 결정론적 결과를 보장한다.
+            var rawResults = new (string FileName, int ExitCode, string OutputText)[inputSourceFiles.Count];
+            int completedCount = 0;
 
-            for (int i = 0; i < inputSourceFiles.Count; i++)
+            onFileProgress?.Invoke(0, inputSourceFiles.Count, Path.GetFileName(inputSourceFiles[0]));
+
+            var parallelOptions = new ParallelOptions
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount),
+                CancellationToken = cancellationToken
+            };
 
-                string src = inputSourceFiles[i];
-                string fileName = Path.GetFileName(src);
-                onFileProgress?.Invoke(i, inputSourceFiles.Count, fileName);
-
-                var psi = new ProcessStartInfo
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, inputSourceFiles.Count),
+                parallelOptions,
+                async (i, ct) =>
                 {
-                    FileName = clangTidyExe,
-                    WorkingDirectory = workingDir,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
-                };
+                    string src = inputSourceFiles[i];
+                    string fileName = Path.GetFileName(src);
 
-                psi.ArgumentList.Add("-checks=-*,bugprone-*,cert-*,clang-analyzer-*");
-                psi.ArgumentList.Add("--quiet");
-                psi.ArgumentList.Add(src);
-                psi.ArgumentList.Add("--");
-                psi.ArgumentList.Add("-xc");
-                psi.ArgumentList.Add($"-std={cStandard}");
-                psi.ArgumentList.Add($"--target={clangTarget}");
-                psi.ArgumentList.Add("-nostdinc");
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = clangTidyExe,
+                        WorkingDirectory = workingDir,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8
+                    };
 
-                if (Directory.Exists(builtinInc))
-                {
-                    psi.ArgumentList.Add("-isystem");
-                    psi.ArgumentList.Add(builtinInc);
-                }
+                    psi.ArgumentList.Add("-checks=-*,bugprone-*,cert-*,clang-analyzer-*");
+                    psi.ArgumentList.Add("--quiet");
+                    psi.ArgumentList.Add(src);
+                    psi.ArgumentList.Add("--");
+                    psi.ArgumentList.Add("-xc");
+                    psi.ArgumentList.Add($"-std={cStandard}");
+                    psi.ArgumentList.Add($"--target={clangTarget}");
+                    psi.ArgumentList.Add("-nostdinc");
 
-                foreach (var inc in includeDirs)
-                {
+                    if (hasBuiltinInc)
+                    {
+                        psi.ArgumentList.Add("-isystem");
+                        psi.ArgumentList.Add(builtinInc);
+                    }
+
+                    foreach (var inc in includeDirs)
+                    {
+                        psi.ArgumentList.Add("-I");
+                        psi.ArgumentList.Add(inc);
+                    }
+
+                    // 누락 헤더 자동 더미(Stub) 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
                     psi.ArgumentList.Add("-I");
-                    psi.ArgumentList.Add(inc);
-                }
+                    psi.ArgumentList.Add(stubBaseDir);
 
-                // 누락 헤더 자동 더미(Stub) 폴더를 마지막 검색 경로로 추가하여 fatal error 방지
-                psi.ArgumentList.Add("-I");
-                psi.ArgumentList.Add(stubBaseDir);
+                    foreach (var def in targetPreset.Defines)
+                    {
+                        if (!string.IsNullOrWhiteSpace(def))
+                            psi.ArgumentList.Add($"-D{def.Trim()}");
+                    }
 
-                foreach (var def in targetPreset.Defines)
-                {
-                    if (!string.IsNullOrWhiteSpace(def))
-                        psi.ArgumentList.Add($"-D{def.Trim()}");
-                }
-
-                if (!string.IsNullOrWhiteSpace(customDefines))
-                {
-                    foreach (var cleaned in ProcessHelper.ParseCustomDefines(customDefines))
+                    foreach (var cleaned in parsedCustomDefines)
                     {
                         psi.ArgumentList.Add($"-D{cleaned}");
                     }
-                }
 
-                psi.ArgumentList.Add("-Wno-everything");
+                    psi.ArgumentList.Add("-Wno-everything");
 
-                // 표준 출력과 표준 오류를 따로 모아 '출력 + 줄바꿈 + 오류' 순서로 합친다 (실행마다 같은 원문 요약)
-                var outputBuilder = new StringBuilder();
-                var errorBuilder = new StringBuilder();
-                int exitCode;
-                using (var proc = new Process { StartInfo = psi })
-                {
-                    proc.OutputDataReceived += (_, e) =>
+                    // 표준 출력과 표준 오류를 따로 모아 '출력 + 줄바꿈 + 오류' 순서로 합친다 (실행마다 같은 원문 요약)
+                    var outputBuilder = new StringBuilder();
+                    var errorBuilder = new StringBuilder();
+                    int exitCode;
+                    using (var proc = new Process { StartInfo = psi })
                     {
-                        if (e.Data != null)
-                            outputBuilder.AppendLine(e.Data);
-                    };
-                    proc.ErrorDataReceived += (_, e) =>
-                    {
-                        if (e.Data != null)
-                            errorBuilder.AppendLine(e.Data);
-                    };
+                        proc.OutputDataReceived += (_, e) =>
+                        {
+                            if (e.Data != null)
+                                outputBuilder.AppendLine(e.Data);
+                        };
+                        proc.ErrorDataReceived += (_, e) =>
+                        {
+                            if (e.Data != null)
+                                errorBuilder.AppendLine(e.Data);
+                        };
 
-                    proc.Start();
-                    proc.BeginOutputReadLine();
-                    proc.BeginErrorReadLine();
-                    await ProcessHelper.WaitForExitOrKillAsync(proc, cancellationToken);
-                    exitCode = proc.ExitCode;
-                }
+                        proc.Start();
+                        proc.BeginOutputReadLine();
+                        proc.BeginErrorReadLine();
+                        await ProcessHelper.WaitForExitOrKillAsync(proc, ct);
+                        exitCode = proc.ExitCode;
+                    }
 
-                string outputText = outputBuilder + "\n" + errorBuilder;
+                    string outputText = outputBuilder + "\n" + errorBuilder;
+                    rawResults[i] = (fileName, exitCode, outputText);
+
+                    int done = Interlocked.Increment(ref completedCount);
+                    onFileProgress?.Invoke(done, inputSourceFiles.Count, fileName);
+                });
+
+            var failedFiles = new List<(string FileName, int ExitCode, string Summary)>();
+            for (int i = 0; i < rawResults.Length; i++)
+            {
+                var (fileName, exitCode, outputText) = rawResults[i];
                 ParseClangTidyOutput(
                     outputText,
                     targetFilesNormalized,
@@ -147,8 +169,6 @@ public class ClangTidyRunner
                 {
                     failedFiles.Add((fileName, exitCode, ProcessHelper.SummarizeErrorLines(outputText)));
                 }
-
-                onFileProgress?.Invoke(i + 1, inputSourceFiles.Count, fileName);
             }
 
             // Clang-Tidy 비정상 종료(컴파일 오류 등)는 분석 결과 일부 누락 가능성을 노트로 안내

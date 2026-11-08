@@ -4,14 +4,18 @@ namespace JeonCheck.Services;
 // 줄 단위로 동작하며 블록 주석(/* */)은 inBlockComment로 줄을 넘어 이어간다.
 public sealed class CodeSegment
 {
-    public CodeSegment(string text, string? foregroundHex)
+    public CodeSegment(string text, string? foregroundHex, bool isItalic = false, string? hoverTip = null)
     {
         Text = text;
         ForegroundHex = foregroundHex;
+        IsItalic = isItalic;
+        HoverTip = hoverTip;
     }
 
     public string Text { get; }
     public string? ForegroundHex { get; } // null이면 줄 상태 색상을 그대로 상속
+    public bool IsItalic { get; }
+    public string? HoverTip { get; } // null이면 호버 팝업 없음
 }
 
 public static class CCodeHighlighter
@@ -65,10 +69,10 @@ public static class CCodeHighlighter
                 int end = line.IndexOf("*/", i, StringComparison.Ordinal);
                 if (end < 0)
                 {
-                    spans.Add(new CodeSegment(line.Substring(i), CommentHex));
+                    spans.Add(new CodeSegment(line.Substring(i), CommentHex, isItalic: true));
                     return spans;
                 }
-                spans.Add(new CodeSegment(line.Substring(i, end + 2 - i), CommentHex));
+                spans.Add(new CodeSegment(line.Substring(i, end + 2 - i), CommentHex, isItalic: true));
                 i = end + 2;
                 inBlockComment = false;
                 plainStart = i;
@@ -79,7 +83,7 @@ public static class CCodeHighlighter
             if (c == '/' && i + 1 < n && line[i + 1] == '/')
             {
                 AddPlain(spans, line, plainStart, i);
-                spans.Add(new CodeSegment(line.Substring(i), CommentHex));
+                spans.Add(new CodeSegment(line.Substring(i), CommentHex, isItalic: true));
                 return spans;
             }
             if (c == '/' && i + 1 < n && line[i + 1] == '*')
@@ -88,11 +92,11 @@ public static class CCodeHighlighter
                 int end = line.IndexOf("*/", i + 2, StringComparison.Ordinal);
                 if (end < 0)
                 {
-                    spans.Add(new CodeSegment(line.Substring(i), CommentHex));
+                    spans.Add(new CodeSegment(line.Substring(i), CommentHex, isItalic: true));
                     inBlockComment = true;
                     return spans;
                 }
-                spans.Add(new CodeSegment(line.Substring(i, end + 2 - i), CommentHex));
+                spans.Add(new CodeSegment(line.Substring(i, end + 2 - i), CommentHex, isItalic: true));
                 i = end + 2;
                 plainStart = i;
                 continue;

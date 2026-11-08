@@ -37,7 +37,7 @@ flowchart TD
 
 ### 2. Cppcheck 실행과 산출물 보호
 
-공통 옵션은 `--enable=all --inconclusive --check-level=exhaustive --xml --dump --std=<선택값>`입니다. 존재하는 플랫폼 XML을 `--platform=`으로 지정하고 프리셋·사용자 매크로와 `-I` 경로를 추가합니다. UI 옵션에 따라 `--force`를 추가합니다. 현재 코드에는 `--xml-version=2` 인자가 없습니다.
+공통 옵션은 `--enable=all --inconclusive --check-level=exhaustive -j<코어수> --xml --dump --std=<선택값>`입니다. 존재하는 플랫폼 XML을 `--platform=`으로 지정하고 프리셋·사용자 매크로와 `-I` 경로를 추가합니다. UI 옵션에 따라 `--force`를 추가합니다. 현재 코드에는 `--xml-version=2` 인자가 없습니다.
 
 `DumpFileGuard`가 기존 `<소스>.dump`와 `<소스>.ctu-info`를 백업한 뒤 실행합니다. 새 dump는 소스 옆에 생성되므로 그 디렉터리에 쓰기 권한이 필요합니다. 종료·취소·오류 시 새 산출물을 정리하고 기존 파일을 복원합니다. 복원 실패 시 백업이 남을 수 있습니다.
 
@@ -50,6 +50,7 @@ flowchart TD
 - `DumpFileParser`는 플랫폼 폭, 토큰 링크·AST, 변수·스코프·함수, 지시문을 모델로 만듭니다.
 - 전처리 후 `tokenlist`의 파일·줄을 분석 줄 집합으로 수집하고, `rawtokens`의 코드 줄 중 분석 집합에 없는 줄을 미검사로 분류합니다. 토큰 파일 경로는 `file`, raw token 파일 인덱스는 `fileIndex`를 사용합니다.
 - 여러 설정·번역 단위의 분석 줄은 합집합으로 병합합니다. 토큰 기반 커버리지는 모든 규칙의 판정 성공이나 완전한 분기 커버리지의 증명이 아닙니다.
+- 파일별 `.dump` 해석(`MisraChecker.CheckDump`, `DumpFileParser.Parse`, `TypeConversionAnalyzer.Analyze`)은 논리 코어 수만큼 병렬로 수행하고, 중복 제거·커버리지·노트 병합은 입력 파일 순서대로 직렬 반영합니다.
 
 ### 4. C# MISRA 검사기
 
@@ -68,7 +69,7 @@ flowchart TD
 
 ### 6. 선택적 Clang-Tidy 분석
 
-실행 파일이 존재하고 옵션이 켜진 경우 `-checks=-*,bugprone-*,cert-*,clang-analyzer-*`, `-xc`, 선택한 `-std`, `--target`, `-nostdinc`를 전달합니다. 내장 간이 표준 헤더, 프로젝트 포함 경로, 임시 stub 경로, 매크로도 추가합니다. `--force`는 전달하지 않습니다.
+실행 파일이 존재하고 옵션이 켜진 경우 `-checks=-*,bugprone-*,cert-*,clang-analyzer-*`, `-xc`, 선택한 `-std`, `--target`, `-nostdinc`를 전달합니다. 내장 간이 표준 헤더, 프로젝트 포함 경로, 임시 stub 경로, 매크로도 추가합니다. `--force`는 전달하지 않습니다. 대상 파일별 `clang-tidy` 프로세스는 논리 코어 수만큼 병렬로 실행한 뒤 입력 파일 순서대로 파싱·중복 제거를 수행합니다.
 
 누락 헤더 stub은 정적으로 찾을 수 있는 include를 대상으로 하며, 절대 경로나 임시 루트 밖으로 벗어나는 경로는 생성하지 않습니다. 빈 헤더로 선언·타입·매크로를 복원할 수 없고 매크로 기반 include 등도 해결하지 못할 수 있습니다. 비정상 종료는 노트로 안내합니다.
 

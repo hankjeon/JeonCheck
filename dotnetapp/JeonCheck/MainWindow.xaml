@@ -148,6 +148,53 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="FloatingPrettifyToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="#3A3D41" />
+            <Setter Property="Foreground" Value="#E6EDF3" />
+            <Setter Property="BorderBrush" Value="#4E5157" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#4B4F55" />
+                                <Setter Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#18324C" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="#58A6FF" />
+                                <Setter Property="Foreground" Value="#79C0FF" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter Property="Opacity" Value="0.92" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="border" Property="Background" Value="#1F4060" />
+                                <Setter Property="Opacity" Value="1" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -177,6 +224,7 @@
                         </MenuItem>
                         <MenuItem Header="도움말(_H)" Style="{StaticResource DarkTopMenuItemStyle}">
                             <MenuItem Header="ℹ️ 전검사 정보(_A)..." Style="{StaticResource DarkSubMenuItemStyle}" Click="OpenAboutWindow_Click" />
+                            <MenuItem Header="📜 히스토리(_H)..." Style="{StaticResource DarkSubMenuItemStyle}" Click="OpenHistoryWindow_Click" />
                         </MenuItem>
                     </Menu>
                 </Border>
@@ -504,7 +552,6 @@
                                         <Setter TargetName="StatusDot" Property="Fill" Value="#6E7681" />
                                         <Setter TargetName="LineBgBorder" Property="Background" Value="#161618" />
                                         <Setter TargetName="CodeTextBlock" Property="Foreground" Value="#6E7681" />
-                                        <Setter TargetName="CodeTextBlock" Property="FontStyle" Value="Italic" />
                                         <Setter TargetName="AnnotationBadge" Property="Background" Value="#282C34" />
                                         <Setter TargetName="AnnotationText" Property="Foreground" Value="#8B949E" />
                                     </DataTrigger>
@@ -561,14 +608,22 @@
                                 MouseMove="OverviewCanvas_MouseMove">
                             <Canvas x:Name="OverviewCanvas" ClipToBounds="True" Background="Transparent" />
                         </Border>
-                        <!-- 코드창 우측 하단 인코딩 플로팅 버튼 (반투명, 마우스 올리면 선명) -->
-                        <Button Grid.Column="0"
-                                HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                Margin="0,0,30,10"
-                                Style="{StaticResource FloatingEncodingButtonStyle}"
-                                Content="{Binding CurrentFileEncodingDisplay}"
-                                Click="CycleFileEncoding_Click"
-                                ToolTip="클릭하면 UTF-8 → CP949 → EUC-KR 순서로 바꿔 다시 읽습니다." />
+                        <!-- 코드창 우측 하단 플로팅 버튼 (Prettify 들여쓰기 정리 + 인코딩 전환) -->
+                        <StackPanel Grid.Column="0"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,30,10">
+                            <ToggleButton Style="{StaticResource FloatingPrettifyToggleStyle}"
+                                          Content="Prettify"
+                                          IsChecked="{Binding IsPrettifyEnabled, Mode=TwoWay}"
+                                          Margin="0,0,6,0"
+                                          ToolTip="코드 들여쓰기 자동 정리 (ON/OFF) — 원본 파일과 줄 번호는 변경하지 않고 화면 표시만 가지런히 정렬합니다." />
+                            <Button Style="{StaticResource FloatingEncodingButtonStyle}"
+                                    Content="{Binding CurrentFileEncodingDisplay}"
+                                    Click="CycleFileEncoding_Click"
+                                    ToolTip="클릭하면 UTF-8 → CP949 → EUC-KR 순서로 바꿔 다시 읽습니다." />
+                        </StackPanel>
                     </Grid>
                 </DockPanel>
 
@@ -902,7 +957,7 @@
             <Border Grid.Column="4" Background="#252526" Padding="12">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Background="#2D2D30" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="4" Padding="10,7" Margin="0,0,0,10">
-                        <TextBlock Text="📖 결함 및 MISRA 규칙 상세 한글 해설" FontWeight="Bold" FontSize="14" Foreground="#E6EDF3" />
+                        <TextBlock Text="📖 결함 및 규칙 상세 설명" FontWeight="Bold" FontSize="14" Foreground="#E6EDF3" />
                     </Border>
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto">

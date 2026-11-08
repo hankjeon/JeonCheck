@@ -17,6 +17,9 @@ public partial class MainWindow : Window
     private static readonly SolidColorBrush MarkerWarningBrush = CreateFrozenBrush("#D29922");
     private static readonly SolidColorBrush MarkerAdvisoryBrush = CreateFrozenBrush("#58A6FF");
 
+    private string _lastSelectedCodeFilePath = string.Empty;
+    private int _lastSelectedLineNumber;
+
     public MainViewModel ViewModel { get; } = new();
 
     public MainWindow()
@@ -25,13 +28,35 @@ public partial class MainWindow : Window
         DataContext = ViewModel;
         DarkTitleBarHelper.Apply(this);
 
-        ViewModel.CodeLinesReloaded += RenderOverviewMarkers;
+        ViewModel.CodeLinesReloaded += OnCodeLinesReloaded;
         ViewModel.RecentProjectsChanged += RebuildRecentProjectsSubmenu;
         Loaded += (_, _) =>
         {
             RenderOverviewMarkers();
             RebuildRecentProjectsSubmenu();
         };
+    }
+
+    private void OnCodeLinesReloaded()
+    {
+        RenderOverviewMarkers();
+
+        string currentNorm = AnalysisIssue.NormalizePath(ViewModel.CurrentCodeFilePath);
+        if (!string.IsNullOrEmpty(currentNorm) &&
+            string.Equals(currentNorm, _lastSelectedCodeFilePath, StringComparison.Ordinal) &&
+            _lastSelectedLineNumber > 0 &&
+            _lastSelectedLineNumber <= ViewModel.CurrentFileLines.Count &&
+            CodeViewerListBox.SelectedItem == null)
+        {
+            var lineVm = ViewModel.CurrentFileLines[_lastSelectedLineNumber - 1];
+            CodeViewerListBox.SelectedItem = lineVm;
+            CodeViewerListBox.ScrollIntoView(lineVm);
+        }
+        else if (!string.Equals(currentNorm, _lastSelectedCodeFilePath, StringComparison.Ordinal))
+        {
+            _lastSelectedCodeFilePath = currentNorm;
+            _lastSelectedLineNumber = 0;
+        }
     }
 
     private static SolidColorBrush CreateFrozenBrush(string hex)
@@ -173,6 +198,15 @@ public partial class MainWindow : Window
     private void OpenAboutWindow_Click(object sender, RoutedEventArgs e)
     {
         var win = new AboutWindow
+        {
+            Owner = this
+        };
+        win.ShowDialog();
+    }
+
+    private void OpenHistoryWindow_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new HistoryWindow
         {
             Owner = this
         };
@@ -567,6 +601,12 @@ public partial class MainWindow : Window
 
     private void CodeViewerListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (CodeViewerListBox.SelectedItem is CodeLineViewModel selectedLine)
+        {
+            _lastSelectedCodeFilePath = AnalysisIssue.NormalizePath(ViewModel.CurrentCodeFilePath);
+            _lastSelectedLineNumber = selectedLine.LineNumber;
+        }
+
         // 결함 목록에서 같은 줄의 다른 결함을 선택해 이동한 경우에는 그 선택을 유지하고,
         // 코드 뷰어에서 직접 줄을 선택한 경우에만 그 줄의 첫 번째 결함을 선택
         if (CodeViewerListBox.SelectedItem is CodeLineViewModel lineVm && lineVm.Issues.Count > 0 &&
