@@ -63,4 +63,4 @@
 - **단계별 검증**: 구현 지시를 받은 후에도 한 번에 과도한 변경을 하기보다, 확인 가능한 단위로 구현하고 빌드 및 동작 여부를 검증한다.
 - **검증 명령과 한계**: [README의 실행 방법](README.md#실행-방법)와 [콘솔 회귀 테스트 안내](dotnetapp/JeonCheck.Analysis.Tests/README.md)를 따른다. 테스트는 `dotnet run --project dotnetapp/JeonCheck.Analysis.Tests`로 실행한다. Linux 교차 빌드 성공과 콘솔 테스트 통과를 Windows GUI·내장 도구 통합 검증으로 표현하지 않는다.
 - **배포 빌드 제한**: `publish/` 밑 단일 실행파일 만들기는 사용자가 명시적으로 요청할 때에만 수행한다. 소스 수정 때마다 만들지 않는다.
-- **수정 범위 기본값**: 기본 수정 대상은 WPF(`dotnetapp/`)이며, `pyapp/`는 사용자가 별도로 요청할 때에만 함께 수정한다.
+- **분석·수정 범위 기본값**: .NET WPF(`dotnetapp/`) 환경의 개발을 우선한다. Python 앱(`pyapp/`)은 사용자가 별도로 요청할 때에만 분석하거나 수정한다.
