@@ -17,6 +17,12 @@
     <Compile Include="../JeonCheck/Models/AnalysisSnapshot.cs" Link="Models/AnalysisSnapshot.cs" />
     <Compile Include="../JeonCheck/Models/CodeLineViewModel.cs" Link="Models/CodeLineViewModel.cs" />
     <Compile Include="../JeonCheck/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
+    <Compile Include="../JeonCheck/ViewModels/MainViewModel.Search.cs" Link="ViewModels/MainViewModel.Search.cs" />
+    <Compile Include="../JeonCheck/Services/SourceSearch.cs" Link="Services/SourceSearch.cs" />
+    <Compile Include="../JeonCheck/Services/CodeTextSelection.cs" Link="Services/CodeTextSelection.cs" />
+    <Compile Include="../JeonCheck/Services/VersionHistory.cs" Link="Services/VersionHistory.cs" />
+    <Compile Include="../JeonCheck/Services/AppInfo.cs" Link="Services/AppInfo.cs" />
+    <None Include="../../data/version_history.json" Link="data/version_history.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../JeonCheck/Services/DumpFileParser.cs" Link="Services/DumpFileParser.cs" />
     <Compile Include="../JeonCheck/Services/EssentialTypeResolver.cs" Link="Services/EssentialTypeResolver.cs" />
     <Compile Include="../JeonCheck/Services/TypeConversionAnalyzer.cs" Link="Services/TypeConversionAnalyzer.cs" />

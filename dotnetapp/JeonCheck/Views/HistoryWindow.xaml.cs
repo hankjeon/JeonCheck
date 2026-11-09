@@ -10,7 +10,10 @@ public partial class HistoryWindow : Window
         InitializeComponent();
         DarkTitleBarHelper.Apply(this);
         VersionBadge.Text = AppInfo.Version;
-        HistoryList.ItemsSource = AppInfo.History.Select(h => new HistoryItemViewModel(h)).ToList();
+        var history = VersionHistory.Load();
+        HistoryList.ItemsSource = history.Entries.Select(h => new HistoryItemViewModel(h)).ToList();
+        HistoryMessage.Text = history.Message;
+        HistoryMessage.Visibility = string.IsNullOrEmpty(history.Message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -20,14 +23,16 @@ public partial class HistoryWindow : Window
 
     private sealed class HistoryItemViewModel
     {
-        public HistoryItemViewModel(AppInfo.HistoryEntry entry)
+        public HistoryItemViewModel(VersionHistoryEntry entry)
         {
             Version = entry.Version;
+            ReleaseDateDisplay = entry.ReleaseDateDisplay;
             Added = entry.Added.Select(a => $"• {a}").ToList();
             Changed = entry.Changed.Select(c => $"• {c}").ToList();
         }
 
         public string Version { get; }
+        public string ReleaseDateDisplay { get; }
         public List<string> Added { get; }
         public List<string> Changed { get; }
         public bool HasAdded => Added.Count > 0;

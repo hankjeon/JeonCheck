@@ -1,4 +1,5 @@
 using JeonCheck.Services;
+using System.ComponentModel;
 
 namespace JeonCheck.Models;
 
@@ -13,8 +14,15 @@ public enum CodeLineStatus
     Suppressed  // 사용자가 '이 줄만 예외(무시) 처리'한 줄 (🔇 음영 표시 + 바로 복원 가능)
 }
 
-public class CodeLineViewModel
+public class CodeLineViewModel : INotifyPropertyChanged
 {
+    private IReadOnlyList<CodeTextRange> _searchRanges = Array.Empty<CodeTextRange>();
+    public IReadOnlyList<CodeTextRange> SearchRanges
+    {
+        get => _searchRanges;
+        set { _searchRanges = value; PropertyChanged?.Invoke(this, new(nameof(SearchRanges))); }
+    }
+    public event PropertyChangedEventHandler? PropertyChanged;
     public int LineNumber { get; set; }
     public string CodeText { get; set; } = string.Empty;
     public List<CodeSegment> HighlightSpans { get; set; } = new();

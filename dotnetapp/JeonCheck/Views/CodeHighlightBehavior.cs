@@ -27,29 +27,40 @@ public static class CodeHighlightBehavior
         if (d is not TextBlock textBlock)
             return;
 
+        if (textBlock is SelectableCodeTextBlock selectable)
+        {
+            selectable.SetCodeSpans(e.NewValue as IReadOnlyList<CodeSegment>);
+            return;
+        }
+
         textBlock.Inlines.Clear();
         if (e.NewValue is not IReadOnlyList<CodeSegment> spans)
             return;
 
         foreach (var span in spans)
         {
-            var run = new Run(span.Text);
-            if (span.ForegroundHex != null)
-            {
-                if (!BrushCache.TryGetValue(span.ForegroundHex, out var brush))
-                {
-                    brush = (SolidColorBrush)new BrushConverter().ConvertFromString(span.ForegroundHex)!;
-                    brush.Freeze();
-                    BrushCache[span.ForegroundHex] = brush;
-                }
-                run.Foreground = brush;
-            }
-            if (span.IsItalic)
-                run.FontStyle = FontStyles.Italic;
-            // HoverTip이 null이면 팝업을 표시하지 않는다.
-            if (!string.IsNullOrEmpty(span.HoverTip))
-                ToolTipService.SetToolTip(run, span.HoverTip);
-            textBlock.Inlines.Add(run);
+            textBlock.Inlines.Add(CreateRun(span));
         }
+    }
+
+    internal static Run CreateRun(CodeSegment span)
+    {
+        var run = new Run(span.Text);
+        if (span.ForegroundHex != null)
+        {
+            if (!BrushCache.TryGetValue(span.ForegroundHex, out var brush))
+            {
+                brush = (SolidColorBrush)new BrushConverter().ConvertFromString(span.ForegroundHex)!;
+                brush.Freeze();
+                BrushCache[span.ForegroundHex] = brush;
+            }
+            run.Foreground = brush;
+        }
+        if (span.IsItalic)
+            run.FontStyle = FontStyles.Italic;
+        // HoverTip이 null이면 팝업을 표시하지 않는다.
+        if (!string.IsNullOrEmpty(span.HoverTip))
+            ToolTipService.SetToolTip(run, span.HoverTip);
+        return run;
     }
 }

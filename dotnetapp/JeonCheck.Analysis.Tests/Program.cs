@@ -153,6 +153,8 @@ Test("다중 파일 병렬 분석(Cppcheck -j, dump 해석, Clang-Tidy) 결과 �
 DescriptionTests.Run(Test);
 SourceFileEncodingTests.Run(Test);
 CodeHighlightTests.Run(Test);
+SourceSearchTests.Run(Test);
+VersionHistoryTests.Run(Test);
 AnalysisSnapshotTests.Run(Test);
 RuleSummaryTests.Run(Test);
 UnknownDiagnosticTests.Run(Test);

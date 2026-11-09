@@ -8,7 +8,7 @@ using JeonCheck.Services;
 
 namespace JeonCheck.ViewModels;
 
-public class MainViewModel : INotifyPropertyChanged
+public partial class MainViewModel : INotifyPropertyChanged
 {
     private readonly DataRepository _repository = new();
     private readonly CppcheckRunner _runner = new();
@@ -424,6 +424,7 @@ public class MainViewModel : INotifyPropertyChanged
         // 진행 중인 분석이 있으면 취소 (이전 작업 공간의 결과가 새 작업 공간에 반영되지 않도록)
         CancelAnalysis();
 
+        ResetSourceSearch();
         _currentProjectFilePath = string.Empty;
         _excludedTargetSubpaths.Clear();
         _excludedNonTargetSubpaths.Clear();

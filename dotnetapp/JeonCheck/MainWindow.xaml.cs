@@ -19,6 +19,7 @@ public partial class MainWindow : Window
 
     private string _lastSelectedCodeFilePath = string.Empty;
     private int _lastSelectedLineNumber;
+    private SelectableCodeTextBlock? _selectedCodeText;
 
     public MainViewModel ViewModel { get; } = new();
 
@@ -555,6 +556,50 @@ public partial class MainWindow : Window
     {
         // 창을 닫을 때 진행 중인 분석을 취소하여 Cppcheck/Clang-Tidy 프로세스가 남지 않도록 함
         ViewModel.CancelAnalysis();
+        ViewModel.CancelSourceSearch();
+    }
+
+    private void CodeText_SelectionStarted(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_selectedCodeText, sender)) _selectedCodeText?.ClearSelection();
+        _selectedCodeText = sender as SelectableCodeTextBlock;
+    }
+
+    private void CodeText_SearchRequested(object? sender, string text)
+    {
+        ViewModel.PrepareSourceSearch(text);
+        ResultsTabControl.SelectedItem = SourceSearchTab;
+        SourceSearchTextBox.Focus();
+        SourceSearchTextBox.SelectAll();
+    }
+
+    private async void SourceSearch_Click(object sender, RoutedEventArgs e) => await ViewModel.SearchSourceAsync();
+
+    private void CancelSourceSearch_Click(object sender, RoutedEventArgs e) => ViewModel.CancelSourceSearch();
+
+    private void SourceSearchTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is not SourceSearchHit hit || !ViewModel.OpenSourceSearchHit(hit)) return;
+        var line = ViewModel.CurrentFileLines[hit.Line - 1];
+        CodeViewerListBox.SelectedItem = line;
+        CodeViewerListBox.ScrollIntoView(line);
+        // 가상화된 줄이 만들어진 다음 가로 스크롤도 검색 위치로 이동한다.
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (CodeViewerListBox.ItemContainerGenerator.ContainerFromItem(line) is DependencyObject container)
+                FindCodeText(container)?.BringSearchIntoView();
+        }));
+    }
+
+    private static SelectableCodeTextBlock? FindCodeText(DependencyObject parent)
+    {
+        if (parent is SelectableCodeTextBlock text) return text;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var found = FindCodeText(VisualTreeHelper.GetChild(parent, i));
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private void DefectsDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)

@@ -7,6 +7,25 @@ namespace JeonCheck.Services;
 /// </summary>
 public static class CCodePrettifier
 {
+    // 검색 결과의 원본 열을 화면용 들여쓰기·탭 확장 위치로 변환한다.
+    public static CodeTextRange MapRangeToDisplay(string raw, string display, CodeTextRange range, int tabSize = 4)
+    {
+        if (raw == display) return range;
+        int leading = raw.Length - raw.TrimStart(' ', '\t', '\r').Length;
+        int end = raw.TrimEnd(' ', '\t', '\r').Length;
+        int ExpandedColumn(int position)
+        {
+            int column = 0;
+            for (int i = leading; i < Math.Min(position, end); i++)
+                column += raw[i] == '\t' ? tabSize - column % tabSize : 1;
+            return column;
+        }
+        int indent = Math.Max(0, display.Length - ExpandedColumn(end));
+        int Map(int position) => Math.Clamp(position < leading ? 0 : indent + ExpandedColumn(position), 0, display.Length);
+        int start = Map(range.Start);
+        return new(start, Math.Max(0, Map(range.Start + range.Length) - start));
+    }
+
     public static string[] PrettifyLines(IReadOnlyList<string> rawLines, int indentSize = 4)
     {
         if (rawLines == null || rawLines.Count == 0)

@@ -8,10 +8,13 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>JeonCheck</AssemblyName>
     <RootNamespace>JeonCheck</RootNamespace>
+    <Version>1.2.0</Version>
     <ApplicationIcon>Resources\app_icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="../../data/version_history.json" Link="data/version_history.json"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Resource Include="Resources\Fonts\D2Coding.ttf" />
     <Resource Include="Resources\app_icon.ico" />
     <Resource Include="Resources\app_icon.png" />

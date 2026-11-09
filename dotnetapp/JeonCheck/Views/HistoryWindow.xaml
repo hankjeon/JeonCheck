@@ -22,6 +22,7 @@
             <TextBlock Text="첫째 자리: 별도 결정 시 올림 · 둘째 자리: 기능 추가 · 셋째 자리: UI·문구 수정"
                        Foreground="#8B949E" FontSize="11.5" Margin="0,0,0,12" TextWrapping="Wrap" />
 
+            <TextBlock x:Name="HistoryMessage" TextWrapping="Wrap" Foreground="#D29922" Margin="0,0,0,12" Visibility="Collapsed" />
             <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420">
                 <ItemsControl x:Name="HistoryList">
                     <ItemsControl.ItemTemplate>
@@ -29,6 +30,7 @@
                             <Border Background="#252526" BorderBrush="#333337" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,0,10">
                                 <StackPanel>
                                     <TextBlock Text="{Binding Version}" FontSize="14" FontWeight="Bold" Foreground="#E6EDF3" Margin="0,0,0,6" />
+                                    <TextBlock Text="{Binding ReleaseDateDisplay}" Foreground="#8B949E" FontSize="11.5" Margin="0,0,0,8" />
                                     <TextBlock Text="추가" Foreground="#3FB950" FontWeight="SemiBold" Margin="0,0,0,2"
                                                Visibility="{Binding HasAdded, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                     <ItemsControl ItemsSource="{Binding Added}" Margin="0,0,0,6"

@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:JeonCheck.Models"
         xmlns:views="clr-namespace:JeonCheck.Views"
+        xmlns:services="clr-namespace:JeonCheck.Services"
         Title="{Binding CurrentProjectTitle}"
         Icon="pack://application:,,,/Resources/app_icon.ico"
         Width="1380" Height="860"
@@ -510,7 +511,9 @@
                                         <Ellipse x:Name="StatusDot" Grid.Column="2" Width="8" Height="8" Fill="Transparent" VerticalAlignment="Center" HorizontalAlignment="Center" />
 
                                         <!-- C 코드 본문 -->
-                                        <TextBlock x:Name="CodeTextBlock" Grid.Column="3" views:CodeHighlightBehavior.Spans="{Binding HighlightSpans}"
+                                        <views:SelectableCodeTextBlock x:Name="CodeTextBlock" Grid.Column="3" views:CodeHighlightBehavior.Spans="{Binding HighlightSpans}"
+                                                   SearchRanges="{Binding SearchRanges}"
+                                                   SelectionStarted="CodeText_SelectionStarted" SearchRequested="CodeText_SearchRequested"
                                                    Foreground="#E6EDF3" VerticalAlignment="Center" />
 
                                         <!-- 인라인 결함 / 미검사 배지 및 줄 단위 즉시 예외/복원 버튼 -->
@@ -630,7 +633,7 @@
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#3E3E42" />
 
                 <!-- 중앙 하단: 결함 목록 / 규칙별 요약 / 노트 / 예외 항목 -->
-                <TabControl Grid.Row="2" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="0,1,0,0">
+                <TabControl x:Name="ResultsTabControl" SelectedIndex="1" Grid.Row="2" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="0,1,0,0">
                     <TabControl.Resources>
                         <Style TargetType="TabItem">
                             <Setter Property="Background" Value="#2D2D30" />
@@ -654,6 +657,55 @@
                             </Setter>
                         </Style>
                     </TabControl.Resources>
+
+                    <TabItem x:Name="SourceSearchTab" Header="검색">
+                        <DockPanel Background="#1E1E1E" TextElement.FontWeight="Normal" TextElement.Foreground="#E6EDF3">
+                            <StackPanel DockPanel.Dock="Top" Background="#252526" Margin="0,0,0,4">
+                                <WrapPanel Margin="8,5">
+                                    <TextBlock Text="검색어:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox x:Name="SourceSearchTextBox" Text="{Binding SourceSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="220" Padding="5,2" Background="#1E1E1E" Foreground="#E6EDF3" BorderBrush="#4E5157" />
+                                    <ComboBox ItemsSource="{Binding SourceSearchScopes}" SelectedIndex="{Binding SourceSearchScope}"
+                                              Width="120" Margin="8,0" />
+                                    <Button Content="검색" Style="{StaticResource DarkButtonStyle}" IsEnabled="{Binding CanSourceSearch}" Click="SourceSearch_Click" />
+                                    <Button Content="취소" Style="{StaticResource DarkButtonStyle}" IsEnabled="{Binding IsSourceSearching}" Click="CancelSourceSearch_Click" />
+                                </WrapPanel>
+                                <WrapPanel Margin="8,0,8,5">
+                                    <CheckBox Content="정규식" IsChecked="{Binding SourceSearchRegex}" Foreground="#E6EDF3" Margin="0,0,14,0" />
+                                    <CheckBox Content="대소문자 구분" IsChecked="{Binding SourceSearchMatchCase}" Foreground="#E6EDF3" Margin="0,0,14,0" />
+                                    <CheckBox Content="단어 전체 일치" IsChecked="{Binding SourceSearchWholeWord}" Foreground="#E6EDF3"
+                                              ToolTip="밑줄·문자·숫자를 포함한 식별자 경계. 정규식에도 동일하게 적용합니다." />
+                                </WrapPanel>
+                            </StackPanel>
+                            <ScrollViewer DockPanel.Dock="Bottom" MaxHeight="70" VerticalScrollBarVisibility="Auto">
+                                <TextBlock Text="{Binding SourceSearchStatus}" Foreground="#9DA7B3" TextWrapping="Wrap" Margin="8,4" />
+                            </ScrollViewer>
+                            <TreeView x:Name="SourceSearchTree" ItemsSource="{Binding SourceSearchFiles}"
+                                      SelectedItemChanged="SourceSearchTree_SelectedItemChanged"
+                                      Background="#1E1E1E" Foreground="#E6EDF3" BorderThickness="0"
+                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.CanContentScroll="True">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsExpanded" Value="True" />
+                                        <Setter Property="Foreground" Value="#E6EDF3" />
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.Resources>
+                                    <HierarchicalDataTemplate DataType="{x:Type services:SourceSearchFile}" ItemsSource="{Binding Hits}">
+                                        <TextBlock Text="{Binding Header}" ToolTip="{Binding FilePath}" Foreground="#58A6FF" />
+                                    </HierarchicalDataTemplate>
+                                    <DataTemplate DataType="{x:Type services:SourceSearchHit}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Line, StringFormat={}{0}:}" Foreground="#9DA7B3" Margin="0,0,4,0" />
+                                            <TextBlock Text="{Binding Column}" Foreground="#9DA7B3" Margin="0,0,10,0" />
+                                            <TextBlock Text="{Binding LineText}" FontFamily="{StaticResource CodingFont}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </TreeView.Resources>
+                            </TreeView>
+                        </DockPanel>
+                    </TabItem>
 
                     <!-- 탭 1: 결함 및 규칙 위반 -->
                     <TabItem Header="{Binding DefectsTabHeader}">
