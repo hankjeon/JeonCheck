@@ -113,6 +113,17 @@ public partial class RulesetWindow : Window
         UpdateActiveCount();
     }
 
+    private static readonly HashSet<string> CopyPasteRelatedRuleIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bugprone-branch-clone",
+        "duplicateBranch",
+        "duplicateAssignExpression",
+        "duplicateExpression",
+        "duplicateValueTernary",
+        "duplicateExpressionTernary",
+        "selfAssignment"
+    };
+
     private void SelectConversionOnly_Click(object sender, RoutedEventArgs e)
     {
         foreach (var r in _allRules)
@@ -120,6 +131,17 @@ public partial class RulesetWindow : Window
             r.IsEnabled = r.Category.Contains("형변환", StringComparison.OrdinalIgnoreCase) ||
                           r.Id.StartsWith("misra-c2012-10.", StringComparison.OrdinalIgnoreCase) ||
                           r.Id.StartsWith("misra-c2012-11.", StringComparison.OrdinalIgnoreCase);
+        }
+        RulesDataGrid.Items.Refresh();
+        UpdateActiveCount();
+    }
+
+    private void SelectCopyPasteOnly_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var r in _allRules)
+        {
+            r.IsEnabled = r.Category.Contains("복사·붙여넣기", StringComparison.OrdinalIgnoreCase) ||
+                          CopyPasteRelatedRuleIds.Contains(r.Id);
         }
         RulesDataGrid.Items.Refresh();
         UpdateActiveCount();

@@ -5723,6 +5723,78 @@
       "description": "같은 함수의 선언과 정의에서 이름의 순서가 다르면 호출자가 인자의 의미를 반대로 이해할 수 있습니다. 타입이 같으면 컴파일 오류 없이 전달되어 논리 오류로 이어질 수 있으므로 선언·정의·호출부의 의미를 함께 확인하십시오.",
       "badExample": "void set_range(int low, int high);\nvoid set_range(int high, int low) { /* 선언과 의미가 뒤바뀜 */ }",
       "goodExample": "void set_range(int low, int high);\nvoid set_range(int low, int high) { /* 선언·정의의 의미를 일치시킴 */ }"
+    },
+    {
+      "id": "copyPasteMacroCommentMismatch",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Warning",
+      "obligation": "필수(Required)",
+      "defaultEnabled": true,
+      "title": "복사 코드의 주석·매크로(채널/번호) 불일치",
+      "summary": "주석이나 주변 문맥의 채널·장치 번호는 바뀌었으나 코드의 #define 매크로나 대상 식별자에 이전 번호가 남아 있음",
+      "description": "인접한 동일 구조의 코드 블록이나 문장에서 주석(예: CH1→CH2, 장치1→장치2, UART0→UART1) 또는 주변 식별자의 채널·장치 번호가 변경되었으나, 전처리 전 원시 토큰의 #define 매크로 이름이나 대상 식별자 일부가 이전 번호 그대로 남아 있습니다. 전처리 후 매크로가 상수로 치환되어 컴파일러가 오류를 잡지 못하므로 주석·문맥과 매크로 번호가 일치하는지 확인하십시오.",
+      "badExample": "/* UART1 채널 초기화 */\nuart_set_baud(UART_CH1_BASE, 115200U);\n\n/* UART2 채널 초기화 */\nuart_set_baud(UART_CH1_BASE, 115200U); // 주석은 UART2인데 매크로는 CH1 그대로 남음",
+      "goodExample": "/* UART1 채널 초기화 */\nuart_set_baud(UART_CH1_BASE, 115200U);\n\n/* UART2 채널 초기화 */\nuart_set_baud(UART_CH2_BASE, 115200U);"
+    },
+    {
+      "id": "copyPasteSequenceMismatch",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Warning",
+      "obligation": "필수(Required)",
+      "defaultEnabled": true,
+      "title": "연속 대입·호출의 인덱스/번호 짝 불일치",
+      "summary": "연속된 대입문이나 함수 호출문에서 앞선 줄의 좌·우변 번호 짝이 다음 줄에서 한쪽만 바뀌고 다른 쪽이 남음",
+      "description": "같은 블록 내 연속된 동일 구조의 대입문 또는 함수 호출문에서 직전 줄까지는 좌변과 우변(배열 인덱스, 채널 매크로, 변수 접미사)이 동일한 번호로 짝을 이루었으나, 이어지는 줄에서 한쪽 번호만 증가·변경되고 다른 쪽은 이전 번호 그대로 남아 있습니다. 복사 후 수정 누락으로 다른 채널이나 배열 요소를 잘못 참조할 수 있으므로 양쪽 번호를 확인하십시오.",
+      "badExample": "pkt.data[0] = rx_buf[0];\npkt.data[1] = rx_buf[1];\npkt.data[2] = rx_buf[1]; // 좌변은 [2]인데 우변은 [1]이 유지됨",
+      "goodExample": "pkt.data[0] = rx_buf[0];\npkt.data[1] = rx_buf[1];\npkt.data[2] = rx_buf[2];"
+    },
+    {
+      "id": "consecutiveTargetOverwrite",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Warning",
+      "obligation": "필수(Required)",
+      "defaultEnabled": true,
+      "title": "구조체 멤버·배열 요소의 연속 덮어쓰기",
+      "summary": "같은 기본 블록에서 변수·구조체 멤버·배열 요소를 읽지 않고 연속 대입하여 덮어씀",
+      "description": "동일한 기본 블록 내에서 같은 변수, 구조체 멤버(a.b, p->b), 또는 상수 배열 요소(arr[0])에 값을 대입한 뒤 중간 읽기나 제어 흐름 변경 없이 즉시 새 값으로 덮어쓰고 있습니다. 복사한 대입문의 좌변 필드명이나 인덱스를 수정하지 못해 발생한 실수일 가능성이 높으므로 대상을 확인하십시오. volatile 한정자가 붙은 하드웨어 레지스터 접근은 제외됩니다.",
+      "badExample": "ctrl.ch1_pwm = calc_pwm(0);\nctrl.ch1_pwm = calc_pwm(1); // ch2_pwm을 쓰려다 ch1_pwm을 덮어씀",
+      "goodExample": "ctrl.ch1_pwm = calc_pwm(0);\nctrl.ch2_pwm = calc_pwm(1);"
+    },
+    {
+      "id": "conditionBodyMismatch",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Warning",
+      "obligation": "필수(Required)",
+      "defaultEnabled": true,
+      "title": "조건식과 본문/연쇄 조건의 대상 불일치",
+      "summary": "포인터 NULL 가드 대상과 본문 역참조 포인터 불일치, 중복 else if 조건, 범위 검사 변수 혼동을 검출함",
+      "description": "조건문과 본문 또는 연쇄 조건식 사이의 대상 불일치를 검출합니다. (1) if (ptr_a != NULL) 검사 후 본문에서 ptr_a 없이 유사 이름의 다른 포인터 ptr_b만 역참조하는 경우, (2) 같은 if-else if 체인에서 앞선 조건과 동일한 조건식이 반복되어 도달 불가능한 경우, (3) 범위 비교(&&/||)에서 다른 변수의 경계 매크로(예: MAX_Y)와 기존 변수(x)를 잘못 비교한 경우를 확인하십시오.",
+      "badExample": "if (rx_pkt != NULL) {\n    tx_pkt->len = 0U; // rx_pkt를 검사하고 tx_pkt를 역참조함\n}",
+      "goodExample": "if (tx_pkt != NULL) {\n    tx_pkt->len = 0U;\n}"
+    },
+    {
+      "id": "loopIndexMismatch",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Warning",
+      "obligation": "필수(Required)",
+      "defaultEnabled": true,
+      "title": "for 루프 헤더·본문 인덱스 변수 혼동",
+      "summary": "for 루프의 초기화·조건·증감식 또는 본문 배열 인덱스에서 다른 루프 인덱스 변수를 잘못 사용함",
+      "description": "for 루프 헤더의 초기화, 종료 조건, 증감식 간에 서로 다른 루프 인덱스 변수가 섞여 있거나(예: for (j = 0; i < N; j++)), 루프 본문에서 현재 루프 변수 j를 전혀 읽지 않고 같은 함수의 다른 루프 변수 i만 배열 인덱스([i])로 사용하고 있습니다. 중첩 루프를 복사해 수정하는 과정에서 인덱스 변수 변경을 빠뜨리면 무한 루프나 잘못된 메모리 접근이 발생합니다.",
+      "badExample": "for (j = 0; j < N; j++) {\n    rx_buf[i] = 0; // 루프 변수 j 대신 이전 루프 변수 i 사용\n}",
+      "goodExample": "for (j = 0; j < N; j++) {\n    rx_buf[j] = 0;\n}"
+    },
+    {
+      "id": "suspiciousCodeClone",
+      "category": "복사·붙여넣기 / 문맥",
+      "severity": "Style",
+      "obligation": "권고(Advisory)",
+      "defaultEnabled": true,
+      "title": "유사 코드 블록 클론 내 식별자 수정 누락",
+      "summary": "3문장 이상의 유사 블록·분기 클론에서 대다수 식별자가 새 이름으로 바뀌었으나 1곳만 원래 식별자로 남아 있음",
+      "description": "인접한 코드 구간이나 if/else·switch case 분기 쌍에서 3문장 이상의 동일 구조 블록을 복사한 뒤, 선행 블록에서 반복 사용된 식별자·매크로 X를 새 블록에서는 과반수 Y로 변경했으나 1곳만 X 그대로 남겨둔 비대칭 클론을 검출합니다. 의도적으로 기존 대상을 유지한 것인지, 복사 후 치환을 누락한 것인지 검토하십시오.",
+      "badExample": "dev_reset(DEV_A);\ndev_set_mode(DEV_A, MODE_NORMAL);\ndev_clear_err(DEV_A);\n\ndev_reset(DEV_B);\ndev_set_mode(DEV_B, MODE_NORMAL);\ndev_clear_err(DEV_A); // 이 위치만 DEV_A가 남아 있음",
+      "goodExample": "dev_reset(DEV_A);\ndev_set_mode(DEV_A, MODE_NORMAL);\ndev_clear_err(DEV_A);\n\ndev_reset(DEV_B);\ndev_set_mode(DEV_B, MODE_NORMAL);\ndev_clear_err(DEV_B);"
     }
   ]
 }

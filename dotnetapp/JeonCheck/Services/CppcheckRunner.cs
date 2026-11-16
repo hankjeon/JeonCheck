@@ -27,6 +27,7 @@ public class CppcheckRunner
 {
     private readonly DumpFileParser _dumpParser = new();
     private readonly TypeConversionAnalyzer _typeAnalyzer = new();
+    private readonly CopyPasteAnalyzer _copyPasteAnalyzer = new();
     private readonly ClangTidyRunner _clangTidyRunner = new();
 
     private static readonly Regex CppcheckPercentRegex = new(
@@ -458,6 +459,9 @@ public class CppcheckRunner
 
                     // 자체 타입 변환 검사 (implicitNarrowing, implicitSignConversion, explicitNarrowingCast, pointerSizeMismatch)
                     item.TypeIssues = _typeAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
+
+                    // 자체 복사/붙여넣기 및 문맥 오류 검사 (6종)
+                    item.CopyPasteIssues = _copyPasteAnalyzer.Analyze(dumpDoc, targetFilesNormalized, rulesById);
                 }
                 catch (Exception ex)
                 {
@@ -552,6 +556,20 @@ public class CppcheckRunner
                 }
             }
 
+            if (item.CopyPasteIssues != null)
+            {
+                foreach (var issue in item.CopyPasteIssues)
+                {
+                    if (issue.RuleId == CopyPasteAnalyzer.RuleConsecutiveOverwrite &&
+                        keys.RedundantAssignmentLines.Contains($"{AnalysisIssue.NormalizePath(issue.FilePath)}|{issue.Line}"))
+                    {
+                        continue;
+                    }
+                    if (keys.TryAdd(issue.RuleId, issue.FilePath, issue.Line, issue.Column))
+                        result.Defects.Add(issue);
+                }
+            }
+
             if (item.TypeIssues != null)
             {
                 foreach (var issue in item.TypeIssues)
@@ -572,6 +590,7 @@ public class CppcheckRunner
         public Exception? DumpParseError { get; set; }
         public HashSet<string>? ReferencedHeaders { get; set; }
         public List<AnalysisIssue>? TypeIssues { get; set; }
+        public List<AnalysisIssue>? CopyPasteIssues { get; set; }
     }
 
     private static void AddMisraViolations(
@@ -649,6 +668,7 @@ public class CppcheckRunner
     {
         public HashSet<string> PositionKeys { get; } = new();
         public HashSet<string> NoteKeys { get; } = new();
+        public HashSet<string> RedundantAssignmentLines { get; } = new();
 
         public bool TryAdd(string ruleId, string filePath, int line, int column)
             => PositionKeys.Add(AnalysisIssue.MakePositionKey(ruleId, filePath, line, column));
@@ -882,6 +902,9 @@ public class CppcheckRunner
 
             if (!keys.TryAdd(id, file, line, col))
                 continue;
+
+            if (id.Equals("redundantAssignment", StringComparison.OrdinalIgnoreCase))
+                keys.RedundantAssignmentLines.Add($"{AnalysisIssue.NormalizePath(file)}|{line}");
 
             string displayMsg = !string.IsNullOrEmpty(ruleInfo.Summary)
                 ? $"{ruleInfo.Summary} ({rawMsg})"

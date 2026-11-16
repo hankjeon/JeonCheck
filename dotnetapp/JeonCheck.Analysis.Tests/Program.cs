@@ -159,6 +159,7 @@ AnalysisSnapshotTests.Run(Test);
 RuleSummaryTests.Run(Test);
 UnknownDiagnosticTests.Run(Test);
 MisraCheckerTests.Run(Test);
+CopyPasteAnalyzerTests.Run(Test);
 
 Console.WriteLine($"회귀 테스트: 성공 {passed}, 실패 {failed}");
 return failed == 0 ? 0 : 1;

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="검사 규칙(Ruleset) 선택 및 관리"
         Icon="pack://application:,,,/Resources/app_icon.ico"
-        Width="1050" Height="740"
+        Width="1140" Height="740"
         WindowStartupLocation="CenterOwner"
         Background="#1E1E1E"
         Foreground="#E6EDF3">
@@ -42,6 +42,7 @@
                     <Button Content="목록 전체 해제" Style="{StaticResource DarkButtonStyle}" Click="UnselectAll_Click" ToolTip="현재 카테고리·검색어로 걸러져 목록에 보이는 규칙만 모두 끕니다" />
                     <Button Content="필수/우선 검토 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectRequiredOnly_Click" ToolTip="MISRA 필수·강제 규칙 및 프로젝트의 필수·우선 검토 정책 규칙을 켭니다 (목록 필터와 무관)" />
                     <Button Content="형변환 집중 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectConversionOnly_Click" ToolTip="전체 규칙 중 형변환 관련 규칙만 켜고 나머지는 끕니다 (목록 필터와 무관)" />
+                    <Button Content="복붙/문맥 집중 선택" Style="{StaticResource DarkButtonStyle}" Click="SelectCopyPasteOnly_Click" ToolTip="전체 규칙 중 복사·붙여넣기 및 문맥 관련 규칙만 켜고 나머지는 끕니다 (목록 필터와 무관)" />
                 </StackPanel>
             </DockPanel>
         </Border>

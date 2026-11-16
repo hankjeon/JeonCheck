@@ -124,6 +124,9 @@ public class DumpScope
     public string BodyEndId { get; set; } = string.Empty;
     public string NestedInId { get; set; } = string.Empty;
     public string FunctionId { get; set; } = string.Empty;
+
+    public DumpToken? BodyStart { get; set; }
+    public DumpToken? BodyEnd { get; set; }
 }
 
 public class DumpVariable
@@ -187,9 +190,18 @@ public class FileLineCoverage
     public HashSet<int> DirectiveLines { get; set; } = new();
 }
 
+public class DumpRawToken
+{
+    public int LineNr { get; set; }
+    public int Column { get; set; }
+    public string Str { get; set; } = string.Empty;
+    public bool IsComment { get; set; }
+}
+
 public class DumpDocument
 {
     public DumpPlatform Platform { get; set; } = new();
     public List<DumpCfgUnit> Configurations { get; set; } = new();
     public Dictionary<string, FileLineCoverage> CoverageByFile { get; set; } = new();
+    public Dictionary<string, List<DumpRawToken>> RawTokensByFile { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

@@ -15,10 +15,12 @@ flowchart TD
     CPP --> Parser[DumpFileParser]
     CPP --> Misra[Misra.MisraChecker: misra.py 이식]
     Parser --> Native[EssentialTypeResolver + TypeConversionAnalyzer]
+    Parser --> CopyPaste[CopyPasteAnalyzer: 6종 문맥·복붙 검사]
     Runner --> CT[ClangTidyRunner: stub 준비 후 Clang-Tidy 실행]
     XML --> Merge[위치 중복 제거 + 한글 해설 연결]
     Misra --> Merge
     Native --> Merge
+    CopyPaste --> Merge
     CT --> Merge
     Merge --> VM
     VM --> Filter[룰셋·예외·검색·분류 필터]
@@ -47,10 +49,10 @@ flowchart TD
 
 - XML 진단에서 파일·줄·열·ID·메시지를 읽고 등록 규칙의 한글 해설을 연결합니다.
 - 헤더 누락과 분석 범위 제한은 노트로 분리합니다. 유효한 결과 XML을 해석할 수 없으면 예외로 처리하여 0건으로 오인하지 않게 합니다.
-- `DumpFileParser`는 플랫폼 폭, 토큰 링크·AST, 변수·스코프·함수, 지시문을 모델로 만듭니다.
+- `DumpFileParser`는 플랫폼 폭, 토큰 링크·AST, 변수·스코프·함수, 지시문과 함께 `<rawtokens>`의 파일별 원시 토큰 및 주석 토큰(`DumpRawToken`)을 `DumpDocument.RawTokensByFile`에 저장합니다.
 - 전처리 후 `tokenlist`의 파일·줄을 분석 줄 집합으로 수집하고, `rawtokens`의 코드 줄 중 분석 집합에 없는 줄을 미검사로 분류합니다. 토큰 파일 경로는 `file`, raw token 파일 인덱스는 `fileIndex`를 사용합니다.
 - 여러 설정·번역 단위의 분석 줄은 합집합으로 병합합니다. 토큰 기반 커버리지는 모든 규칙의 판정 성공이나 완전한 분기 커버리지의 증명이 아닙니다.
-- 파일별 `.dump` 해석(`MisraChecker.CheckDump`, `DumpFileParser.Parse`, `TypeConversionAnalyzer.Analyze`)은 논리 코어 수만큼 병렬로 수행하고, 중복 제거·커버리지·노트 병합은 입력 파일 순서대로 직렬 반영합니다.
+- 파일별 `.dump` 해석(`MisraChecker.CheckDump`, `DumpFileParser.Parse`, `TypeConversionAnalyzer.Analyze`, `CopyPasteAnalyzer.Analyze`)은 논리 코어 수만큼 병렬로 수행하고, 중복 제거·커버리지·노트 병합은 입력 파일 순서대로 직렬 반영합니다.
 
 ### 4. C# MISRA 검사기
 
@@ -66,6 +68,10 @@ flowchart TD
 ### 5. 자체 타입 변환 검사
 
 `EssentialTypeResolver`는 가능한 식에 대해 필수 타입 범주·비트 폭을 계산하고, `TypeConversionAnalyzer`가 MISRA와 별도인 자체 ID `implicitNarrowing`, `implicitSignConversion`, `explicitNarrowingCast`, `pointerSizeMismatch`를 보고합니다. 대입·인자·반환의 변환은 정수 승격 후 타입만으로 판정하지 않으며, 정수 상수식의 표현 가능 범위 예외를 처리합니다. 캐스트 자체와 캐스트 결과에서 최종 대상까지의 변환은 별도로 검사합니다. 해석할 수 없는 정보는 일부 검사 생략으로 이어집니다.
+
+### 5-1. 자체 복사/붙여넣기(문맥) 검사
+
+`CopyPasteAnalyzer`는 전처리 후 AST(`<tokenlist>`)와 전처리 전 원시 토큰·주석(`<rawtokens>`)을 함께 사용해 자체 ID 6종(`copyPasteMacroCommentMismatch`, `copyPasteSequenceMismatch`, `consecutiveTargetOverwrite`, `conditionBodyMismatch`, `loopIndexMismatch`, `suspiciousCodeClone`)을 검사합니다. 표준 타입명(`uint32_t` 등)과 고정 상수 초기화(`arr[0] = 0; arr[1] = 0;`), `volatile` 대상 연속 쓰기, 중첩 루프 2차원 인덱싱(`arr[i][j]`) 등은 제외해 오탐을 억제하며, `consecutiveTargetOverwrite`는 같은 파일·줄에 Cppcheck `redundantAssignment`가 이미 보고된 경우 중복 보고하지 않습니다. 정적 패턴·주석 비교 기반이므로 모든 의미적 복사/붙여넣기 오류 검출을 보장하지는 않습니다.
 
 ### 6. 선택적 Clang-Tidy 분석
 

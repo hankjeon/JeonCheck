@@ -135,6 +135,10 @@ public class DumpFileParser
                     NestedInId = sElem.Attribute("nestedIn")?.Value ?? string.Empty,
                     FunctionId = sElem.Attribute("function")?.Value ?? string.Empty
                 };
+                if (!string.IsNullOrEmpty(scope.BodyStartId) && unit.TokenById.TryGetValue(scope.BodyStartId, out var bodyStartTok))
+                    scope.BodyStart = bodyStartTok;
+                if (!string.IsNullOrEmpty(scope.BodyEndId) && unit.TokenById.TryGetValue(scope.BodyEndId, out var bodyEndTok))
+                    scope.BodyEnd = bodyEndTok;
                 if (!string.IsNullOrEmpty(scope.Id))
                     unit.ScopeById[scope.Id] = scope;
 
@@ -282,13 +286,29 @@ public class DumpFileParser
         {
             string fIdx = rTok.Attribute("fileIndex")?.Value ?? string.Empty;
             int lineNr = ParseInt(rTok.Attribute("linenr"), 0);
+            int column = ParseInt(rTok.Attribute("column"), 0);
             string str = rTok.Attribute("str")?.Value ?? string.Empty;
 
             if (lineNr <= 0 || string.IsNullOrEmpty(str) || !fileByIndex.TryGetValue(fIdx, out string? filePath))
                 continue;
 
+            bool isComment = str.StartsWith("/*", StringComparison.Ordinal) || str.StartsWith("//", StringComparison.Ordinal);
+            string normFile = AnalysisIssue.NormalizePath(filePath);
+            if (!doc.RawTokensByFile.TryGetValue(normFile, out var rawList))
+            {
+                rawList = new List<DumpRawToken>();
+                doc.RawTokensByFile[normFile] = rawList;
+            }
+            rawList.Add(new DumpRawToken
+            {
+                LineNr = lineNr,
+                Column = column,
+                Str = str,
+                IsComment = isComment
+            });
+
             // 주석 토큰 제외
-            if (str.StartsWith("/*", StringComparison.Ordinal) || str.StartsWith("//", StringComparison.Ordinal))
+            if (isComment)
                 continue;
 
             var key = (filePath, lineNr);

@@ -60,7 +60,7 @@ public partial class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<string> RecentProjects { get; } = new();
     public ObservableCollection<string> DefectCategoryFilters { get; } = new()
     {
-        "전체", "타입 및 형변환", "MISRA C 2012", "Clang-Tidy / CERT-C", "메모리 및 포인터", "산술 및 연산", "제어 흐름 및 품질", "구문 및 환경"
+        "전체", "타입 및 형변환", "복사·붙여넣기 / 문맥", "MISRA C 2012", "Clang-Tidy / CERT-C", "메모리 및 포인터", "산술 및 연산", "제어 흐름 및 품질", "구문 및 환경"
     };
 
     public TargetPreset? SelectedTargetPreset

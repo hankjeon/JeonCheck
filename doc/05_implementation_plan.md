@@ -79,6 +79,23 @@
 - 별도 Windows WPF 검증에서 이력 창 생성·레이아웃·바인딩을 평가해 정상 목록, 파일 누락·JSON 오류 안내, 수정 후 재생성, 날짜 표시와 앱 버전 유지, 작업 디렉터리와 무관한 경로 사용을 확인했다. 실제 마우스 조작·화면 픽셀 비교를 수행한 것은 아니다.
 - 실제 빌드 출력의 JSON을 읽었고, MSBuild `GetCopyToPublishDirectoryItems`의 `data/version_history.json` 경로와 `ExcludeFromSingleFile=true` 메타데이터를 확인했다. `publish/` 배포 빌드 및 배포 실행파일 실제 구동은 수행하지 않았다.
 
+## PLAN-03. 복사/붙여넣기(문맥) 오류 검사 (CopyPasteAnalyzer)
+
+**상태:** 구현 완료 / .NET 빌드(경고·오류 0) 및 콘솔 회귀 테스트 검증
+
+### 정리된 요구사항
+
+- 전처리 후 AST(`<tokenlist>`)와 전처리 전 원시 토큰·주석(`<rawtokens>`)을 결합해 복사/붙여넣기 실수 6종(`copyPasteMacroCommentMismatch`, `copyPasteSequenceMismatch`, `consecutiveTargetOverwrite`, `conditionBodyMismatch`, `loopIndexMismatch`, `suspiciousCodeClone`)을 검출한다.
+- 오탐 방지를 위해 표준 타입명(`uint32_t` 등), 고정 상수 초기화(`arr[0]=0; arr[1]=0;`), `volatile` 대상 연속 쓰기, 우변 자기 읽기, 중첩 루프 2차원 인덱싱(`arr[i][j]`) 등을 제외한다.
+- `rules_ko.json`의 독립 `"복사·붙여넣기 / 문맥"` 카테고리에 한글 설명·예시를 등록하고 `MainViewModel.DefectCategoryFilters` 및 `RulesetWindow`의 `[복붙/문맥 집중 선택]` 버튼으로 기존 룰셋 ON/OFF·개별 예외·결함/요약 탭 필터와 연동한다.
+
+### 구현 및 검증 결과
+
+- 구현 위치: `Models/DumpDataModels.cs`(`DumpRawToken`, `RawTokensByFile`), `Services/DumpFileParser.cs`, `Services/CopyPasteAnalyzer.cs`, `Services/CppcheckRunner.cs`(`redundantAssignment` 중복 억제 포함), `ViewModels/MainViewModel.cs`(`DefectCategoryFilters`에 `"복사·붙여넣기 / 문맥"` 추가), `Views/RulesetWindow.xaml`·`RulesetWindow.xaml.cs`(`[복붙/문맥 집중 선택]` 버튼), `data/rules_ko.json`, `JeonCheck.Analysis.Tests/CopyPasteAnalyzerTests.cs`.
+- 한계: 정적 AST·원시 토큰·주석 패턴 비교 기반이므로 모든 의미적 복사/붙여넣기 결함을 보장하지 않는다.
+- Windows .NET 빌드(`dotnet build dotnetapp/JeonCheck.sln`): 경고 0개, 오류 0개.
+- 콘솔 회귀 테스트(`dotnet run --project dotnetapp/JeonCheck.Analysis.Tests`): 복사/붙여넣기 테스트 9개(6종 양성/음성, 규칙 OFF, 실제 Cppcheck `.dump` + `<rawtokens>` 연동, `"복사·붙여넣기 / 문맥"` 분류 분리 및 `MainViewModel` 필터/요약 연동) 포함 93건 통과. 기존 사전 실패 1건(`추가 번역 규칙을 실제 파서와 UI에서 한글 설명으로 표시`)은 본 작업과 무관하게 유지된다. (`RulesetWindow` 버튼 클릭 자체는 콘솔 테스트 범위 외이므로 빌드 컴파일로만 확인했다.)
+
 ## 진행 원칙
 
 - 구현 요청 전에는 애플리케이션 코드나 실제 이력 JSON 파일을 만들거나 수정하지 않는다.

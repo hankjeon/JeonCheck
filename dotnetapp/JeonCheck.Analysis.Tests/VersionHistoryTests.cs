@@ -4,13 +4,18 @@ static class VersionHistoryTests
 {
     public static void Run(Action<string, Action> test)
     {
-        test("버전 이력: 기존 세 버전의 이관·현재 버전 독립성", () =>
+        test("버전 이력: 기존 버전들의 이관·현재 버전 독립성", () =>
         {
             var result = VersionHistory.Load();
             Require(result.Message == "", result.Message);
-            Require(result.Entries.Select(e => e.Version).SequenceEqual(new[] { "v1.2.0", "v1.1.0", "v1.0" }), "버전 누락/순서 변경");
+            Require(result.Entries.Select(e => e.Version).SequenceEqual(new[] { "v1.3.0", "v1.2.0", "v1.1.0", "v1.0" }), "버전 누락/순서 변경");
             string[][] expectedAdded =
             {
+                new[]
+                {
+                    "복사·붙여넣기(문맥) 버그 검출 기능 추가: 주석-매크로 번호 불일치, 연속 대입·호출 짝 불일치, 연속 덮어쓰기, 조건식-본문 대상 불일치, for 루프 인덱스 혼동, 코드 클론 내 미수정 식별자 6종 검사",
+                    "결함 분류 필터에 '복사·붙여넣기 / 문맥' 추가 및 규칙 설정 창에 [복붙/문맥 집중 선택] 버튼 추가"
+                },
                 new[]
                 {
                     "코드 한 줄 안에서 문자 드래그·더블 클릭 단어 선택·더블 클릭 후 단어 단위 드래그 선택",
@@ -31,15 +36,16 @@ static class VersionHistoryTests
             };
             for (int i = 0; i < expectedAdded.Length; i++)
                 Require(result.Entries[i].Added.SequenceEqual(expectedAdded[i]), $"{result.Entries[i].Version} 추가 이력 유실");
-            Require(result.Entries[1].Changed.SequenceEqual(new[]
+            Require(result.Entries[0].Changed.Length == 0, "v1.3.0 수정 이력 변경");
+            Require(result.Entries[2].Changed.SequenceEqual(new[]
             {
                 "주석을 이탤릭(기울임글꼴)으로 표시",
                 "미검사(Skipped) 줄의 줄 전체 이탤릭 제거 (회색 색상은 유지)",
                 "버전을 3자리(v1.1.0)로 표기"
             }), "v1.1.0 수정 이력 유실");
-            Require(result.Entries[2].Changed.Length == 0, "v1.0 수정 이력 변경");
+            Require(result.Entries[3].Changed.Length == 0, "v1.0 수정 이력 변경");
             Require(result.Entries.All(e => e.ReleaseDate == null && e.ReleaseDateDisplay == "출시일 미등록"), "출시일 임의 지정");
-            Require(AppInfo.Version == "v1.2.0", "앱 버전 유지");
+            Require(AppInfo.Version == "v1.3.0", "앱 버전 유지");
         });
         test("버전 이력: 파일 순서·출시일 표시와 창 재오픈 시 재로드", () => WithPath(path =>
         {
@@ -55,7 +61,7 @@ static class VersionHistoryTests
             File.WriteAllText(path, """{"versions":[{"version":"v99.0","releaseDate":null,"added":["수정 반영"],"changed":[]}]}""");
             var second = VersionHistory.Load(path);
             Require(second.Entries.Single().Added.Single() == "수정 반영", "캐시로 인해 편집 미반영");
-            Require(AppInfo.Version == "v1.2.0", "JSON이 앱 버전을 바꿈");
+            Require(AppInfo.Version == "v1.3.0", "JSON이 앱 버전을 바꿈");
         }));
         test("버전 이력: 누락 파일·디렉터리 경로도 오류 안내로 반환", () => WithPath(path =>
         {
