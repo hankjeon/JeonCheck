@@ -138,6 +138,64 @@ static class SourceSearchTests
             task.GetAwaiter().GetResult();
             Require(!vm.IsSourceSearching && vm.SourceSearchFiles.Count == 0 && vm.SourceSearchStatus.Contains("버튼"), "이전 프로젝트 결과 유입");
         }));
+        test("탐색 히스토리: 검색 이동·뒤로/앞으로·새 이동 시 초기화·옵션 유지·작업 공간 초기화", () => WithFiles((_, a, b) =>
+        {
+            var vm = new MainViewModel();
+            vm.ClearWorkspace();
+            vm.AddTargetPath(a);
+            vm.AddNonTargetPath(b);
+            vm.SourceSearchText = "변수";
+            vm.SearchSourceAsync().GetAwaiter().GetResult();
+            var hitB = vm.SourceSearchFiles
+                .Single(f => string.Equals(AnalysisIssue.NormalizePath(f.FilePath), AnalysisIssue.NormalizePath(b), StringComparison.Ordinal))
+                .Hits[0];
+
+            // 1. 파일 A의 2번째 줄을 보다가 검색 결과(파일 B 1번째 줄)로 이동 후 뒤로/앞으로 가기
+            Require(vm.NavigateToCodeLocation(a, 1), "파일 A 열기");
+            Require(!vm.CanNavigateBack && !vm.CanNavigateForward, "최초 파일 열기 시 히스토리 없음");
+            vm.UpdateCurrentCodeLine(2);
+            Require(vm.CurrentCodeLineNumber == 2 && !vm.CanNavigateBack, "줄 선택만으로는 뒤로가기 스택 미추가");
+
+            Require(vm.OpenSourceSearchHit(hitB), "검색 결과(파일 B)로 이동");
+            Require(string.Equals(AnalysisIssue.NormalizePath(vm.CurrentCodeFilePath), AnalysisIssue.NormalizePath(b), StringComparison.Ordinal), "파일 B 표시");
+            Require(vm.CurrentCodeLineNumber == 1, "파일 B 1번째 줄 위치");
+            Require(vm.CanNavigateBack && !vm.CanNavigateForward, "검색 이동 후 뒤로가기만 가능");
+
+            Require(vm.NavigateBack(), "뒤로가기 실행");
+            Require(string.Equals(AnalysisIssue.NormalizePath(vm.CurrentCodeFilePath), AnalysisIssue.NormalizePath(a), StringComparison.Ordinal), "파일 A 복귀");
+            Require(vm.CurrentCodeLineNumber == 2, "파일 A 2번째 줄 복원");
+            Require(!vm.CanNavigateBack && vm.CanNavigateForward, "뒤로가기 후 앞으로가기 가능");
+
+            Require(vm.NavigateForward(), "앞으로가기 실행");
+            Require(string.Equals(AnalysisIssue.NormalizePath(vm.CurrentCodeFilePath), AnalysisIssue.NormalizePath(b), StringComparison.Ordinal), "파일 B 재이동");
+            Require(vm.CurrentCodeLineNumber == 1, "파일 B 1번째 줄 복원");
+            Require(vm.CanNavigateBack && !vm.CanNavigateForward, "앞으로가기 후 뒤로가기 가능");
+
+            // 2. 뒤로가기 상태에서 새로운 위치로 이동 시 앞으로가기 스택 초기화
+            Require(vm.NavigateBack(), "앞으로가기 스택 생성을 위한 뒤로가기");
+            Require(vm.CanNavigateForward, "앞으로가기 가능 상태 확인");
+            Require(vm.NavigateToCodeLocation(a, 1), "같은 파일 새 줄(1번째 줄)로 이동");
+            Require(vm.CurrentCodeLineNumber == 1, "새 줄 위치 반영");
+            Require(vm.CanNavigateBack && !vm.CanNavigateForward, "새 위치 이동 시 앞으로가기 스택 초기화");
+
+            // 3. Prettify 토글, 인코딩 순환, 결함 필터 갱신 시 탐색 히스토리 유지
+            Require(vm.NavigateToCodeLocation(b, 1), "히스토리 양방향 구성을 위해 파일 B 이동");
+            Require(vm.NavigateBack(), "양방향 스택 활성화를 위한 뒤로가기");
+            Require(vm.CanNavigateBack && vm.CanNavigateForward, "뒤로/앞으로 모두 가능한 상태");
+
+            vm.IsPrettifyEnabled = !vm.IsPrettifyEnabled;
+            Require(vm.CanNavigateBack && vm.CanNavigateForward, "Prettify 토글 후 히스토리 유지");
+            vm.CycleFileEncoding();
+            Require(vm.CanNavigateBack && vm.CanNavigateForward, "인코딩 전환 후 히스토리 유지");
+            vm.RefreshFilteredDefects();
+            Require(vm.CanNavigateBack && vm.CanNavigateForward, "결함 필터 갱신 후 히스토리 유지");
+
+            Require(vm.NavigateBack() && vm.CurrentCodeLineNumber == 2, "옵션 변경 이후에도 기존 뒤로가기 대상(2번째 줄) 오염 없음");
+
+            // 4. 작업 공간 초기화 시 탐색 히스토리 및 현재 줄 초기화
+            vm.ClearWorkspace();
+            Require(!vm.CanNavigateBack && !vm.CanNavigateForward && vm.CurrentCodeLineNumber == 1, "ClearWorkspace 후 히스토리 및 줄 번호 초기화");
+        }));
     }
 
     private static void WithFiles(Action<string, string, string> action)

@@ -30,12 +30,23 @@ public partial class MainWindow : Window
         DarkTitleBarHelper.Apply(this);
 
         ViewModel.CodeLinesReloaded += OnCodeLinesReloaded;
+        ViewModel.NavigationLineRequested += OnNavigationLineRequested;
         ViewModel.RecentProjectsChanged += RebuildRecentProjectsSubmenu;
         Loaded += (_, _) =>
         {
             RenderOverviewMarkers();
             RebuildRecentProjectsSubmenu();
         };
+    }
+
+    private void OnNavigationLineRequested(int lineNumber)
+    {
+        if (lineNumber > 0 && lineNumber <= ViewModel.CurrentFileLines.Count)
+        {
+            var targetLineVm = ViewModel.CurrentFileLines[lineNumber - 1];
+            CodeViewerListBox.SelectedItem = targetLineVm;
+            CodeViewerListBox.ScrollIntoView(targetLineVm);
+        }
     }
 
     private void OnCodeLinesReloaded()
@@ -188,8 +199,16 @@ public partial class MainWindow : Window
 
     private void JumpToCodeLine(CodeLineViewModel targetLineVm)
     {
-        CodeViewerListBox.SelectedItem = targetLineVm;
-        CodeViewerListBox.ScrollIntoView(targetLineVm);
+        if (!string.IsNullOrEmpty(ViewModel.CurrentCodeFilePath))
+        {
+            ViewModel.NavigateToCodeLocation(ViewModel.CurrentCodeFilePath, targetLineVm.LineNumber);
+        }
+        else
+        {
+            CodeViewerListBox.SelectedItem = targetLineVm;
+            CodeViewerListBox.ScrollIntoView(targetLineVm);
+        }
+
         if (targetLineVm.Issues.Count > 0)
         {
             ViewModel.SelectedIssue = targetLineVm.Issues[0];
@@ -365,8 +384,39 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NavigateBack_Click(object sender, RoutedEventArgs e) => ViewModel.NavigateBack();
+
+    private void NavigateForward_Click(object sender, RoutedEventArgs e) => ViewModel.NavigateForward();
+
+    private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.XButton1)
+        {
+            if (ViewModel.NavigateBack()) e.Handled = true;
+        }
+        else if (e.ChangedButton == MouseButton.XButton2)
+        {
+            if (ViewModel.NavigateForward()) e.Handled = true;
+        }
+    }
+
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (Keyboard.Modifiers == ModifierKeys.Alt)
+        {
+            Key sysKey = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (sysKey == Key.Left)
+            {
+                if (ViewModel.NavigateBack()) e.Handled = true;
+                return;
+            }
+            if (sysKey == Key.Right)
+            {
+                if (ViewModel.NavigateForward()) e.Handled = true;
+                return;
+            }
+        }
+
         if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
             return;
 
@@ -512,7 +562,7 @@ public partial class MainWindow : Window
     {
         if (e.NewValue is SourceTreeNode node && !node.IsDirectory)
         {
-            ViewModel.LoadFileIntoCodeViewer(node.FullPath);
+            ViewModel.NavigateToCodeLocation(node.FullPath, 1);
         }
     }
 
@@ -520,7 +570,7 @@ public partial class MainWindow : Window
     {
         if (e.NewValue is SourceTreeNode node && !node.IsDirectory)
         {
-            ViewModel.LoadFileIntoCodeViewer(node.FullPath);
+            ViewModel.NavigateToCodeLocation(node.FullPath, 1);
         }
     }
 
@@ -650,6 +700,7 @@ public partial class MainWindow : Window
         {
             _lastSelectedCodeFilePath = AnalysisIssue.NormalizePath(ViewModel.CurrentCodeFilePath);
             _lastSelectedLineNumber = selectedLine.LineNumber;
+            ViewModel.UpdateCurrentCodeLine(selectedLine.LineNumber);
         }
 
         // 결함 목록에서 같은 줄의 다른 결함을 선택해 이동한 경우에는 그 선택을 유지하고,
@@ -663,25 +714,7 @@ public partial class MainWindow : Window
 
     private void NavigateToFileAndLine(string filePath, int line)
     {
-        if (!File.Exists(filePath))
-        {
-            ViewModel.StatusMessage = $"이동할 파일을 찾을 수 없습니다: {filePath}";
-            return;
-        }
-        if (!string.Equals(
-                AnalysisIssue.NormalizePath(ViewModel.CurrentCodeFilePath),
-                AnalysisIssue.NormalizePath(filePath),
-                StringComparison.Ordinal))
-        {
-            ViewModel.LoadFileIntoCodeViewer(filePath);
-        }
-
-        if (line > 0 && line <= ViewModel.CurrentFileLines.Count)
-        {
-            var targetLineVm = ViewModel.CurrentFileLines[line - 1];
-            CodeViewerListBox.SelectedItem = targetLineVm;
-            CodeViewerListBox.ScrollIntoView(targetLineVm);
-        }
+        ViewModel.NavigateToCodeLocation(filePath, line);
     }
 
     private void SuppressSingleIssue_Click(object sender, RoutedEventArgs e)

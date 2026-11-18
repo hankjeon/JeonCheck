@@ -441,6 +441,7 @@ public partial class MainViewModel : INotifyPropertyChanged
         CurrentFileLines.Clear();
         CodeLinesReloaded?.Invoke();
         CurrentCodeFilePath = string.Empty;
+        ClearNavigationHistory();
         SelectedIssue = null;
         CodeStatsSummary = "파일을 선택하면 라인별 검사 상태가 표시됩니다.";
         NotifyCountsChanged();

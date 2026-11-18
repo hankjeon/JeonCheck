@@ -96,6 +96,22 @@
 - Windows .NET 빌드(`dotnet build dotnetapp/JeonCheck.sln`): 경고 0개, 오류 0개.
 - 콘솔 회귀 테스트(`dotnet run --project dotnetapp/JeonCheck.Analysis.Tests`): 복사/붙여넣기 테스트 9개(6종 양성/음성, 규칙 OFF, 실제 Cppcheck `.dump` + `<rawtokens>` 연동, `"복사·붙여넣기 / 문맥"` 분류 분리 및 `MainViewModel` 필터/요약 연동) 포함 93건 통과. 기존 사전 실패 1건(`추가 번역 규칙을 실제 파서와 UI에서 한글 설명으로 표시`)은 본 작업과 무관하게 유지된다. (`RulesetWindow` 버튼 클릭 자체는 콘솔 테스트 범위 외이므로 빌드 컴파일로만 확인했다.)
 
+## PLAN-04. 코드 뷰어 뒤로/앞으로 탐색 히스토리 (v1.4.0)
+
+**상태:** v1.4.0 구현 / .NET 빌드(경고·오류 0) 및 콘솔 회귀 테스트 검증
+
+### 정리된 요구사항
+
+- 파일·줄 번호 위치를 함께 기록해 이전(`◀`)·다음(`▶`) 위치로 즉시 복원하는 탐색 히스토리를 제공한다.
+- 코드 뷰어 헤더 바 좌측 `[◀]`/`[▶]` 탐색 버튼, 마우스 측면 버튼(XButton1/XButton2), 키보드 `Alt+←`/`Alt+→` 단축키를 지원한다.
+- 뒤로 가기 상태에서 새 위치로 이동하면 앞으로 가기 스택을 초기화하며, Prettify·인코딩 변경·결함 필터 갱신 시에는 히스토리를 유지하고 작업 공간 초기화 시 비운다.
+
+### 구현 및 검증 결과
+
+- 구현 위치: `ViewModels/MainViewModel.Navigation.cs`(탐색 스택·`CodeNavigationEntry`·`NavigateToCodeLocation`/`NavigateBack`/`NavigateForward`·`ClearNavigationHistory`), `ViewModels/MainViewModel.cs`·`MainViewModel.Search.cs`(파일·결함·노트·검색 결과 이동 연동), `MainWindow.xaml`·`MainWindow.xaml.cs`(`[◀]`/`[▶]` 버튼, `PreviewMouseDown` XButton1/XButton2 및 `PreviewKeyDown` `Alt+←`/`Alt+→` 처리, 줄 스크롤 동기화), `JeonCheck.Analysis.Tests/SourceSearchTests.cs`(탐색 히스토리 회귀 테스트).
+- Windows .NET 빌드(`dotnet build dotnetapp/JeonCheck.sln`): 경고 0개, 오류 0개.
+- 콘솔 회귀 테스트(`dotnet run --project dotnetapp/JeonCheck.Analysis.Tests`): 신규 `탐색 히스토리: 검색 이동·뒤로/앞으로·새 이동 시 초기화·옵션 유지·작업 공간 초기화` 및 `VersionHistoryTests` 포함 94건 통과(기존 사전 실패 1건 제외). (`MainWindow` 버튼·마우스·키보드 입력 이벤트 자체는 콘솔 테스트 범위 외이므로 빌드 컴파일로 확인했다.)
+
 ## 진행 원칙
 
 - 구현 요청 전에는 애플리케이션 코드나 실제 이력 JSON 파일을 만들거나 수정하지 않는다.

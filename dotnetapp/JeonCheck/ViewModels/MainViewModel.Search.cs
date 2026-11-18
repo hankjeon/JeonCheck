@@ -144,7 +144,8 @@ public partial class MainViewModel
                 SourceSearchStatus = "검색 후 파일 내용이 변경되었습니다. 다시 검색해 주세요.";
                 return false;
             }
-            LoadFileIntoCodeViewer(hit.FilePath, hit.EncodingName);
+            if (!NavigateToCodeLocation(hit.FilePath, hit.Line, hit.EncodingName))
+                return false;
             ClearSearchHighlights();
             if (_executedSearchOptions != null)
             {

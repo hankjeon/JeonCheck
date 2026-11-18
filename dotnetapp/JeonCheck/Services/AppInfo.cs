@@ -4,5 +4,5 @@ namespace JeonCheck.Services;
 // 버전 규칙: 3자리 표기. UI·문구 수정은 셋째 자리, 기능 추가는 둘째 자리, 첫째 자리는 별도 결정 시 올린다.
 public static class AppInfo
 {
-    public const string Version = "v1.3.0";
+    public const string Version = "v1.4.0";
 }

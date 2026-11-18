@@ -11,6 +11,7 @@
         WindowStartupLocation="CenterScreen"
         Closing="MainWindow_Closing"
         PreviewKeyDown="MainWindow_PreviewKeyDown"
+        PreviewMouseDown="MainWindow_PreviewMouseDown"
         Background="#1E1E1E"
         Foreground="#E6EDF3">
     <Window.Resources>
@@ -435,6 +436,24 @@
                     <!-- 코드 뷰어 헤더 바 -->
                     <Border DockPanel.Dock="Top" Background="#252526" BorderBrush="#3E3E42" BorderThickness="0,0,0,1" Padding="10,6">
                         <DockPanel>
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,10,0">
+                                <Button Content="◀"
+                                        Width="28"
+                                        Style="{StaticResource DarkButtonStyle}"
+                                        Padding="0,2"
+                                        FontSize="11.5"
+                                        IsEnabled="{Binding CanNavigateBack}"
+                                        ToolTip="{Binding BackNavigationToolTip}"
+                                        Click="NavigateBack_Click" />
+                                <Button Content="▶"
+                                        Width="28"
+                                        Style="{StaticResource DarkButtonStyle}"
+                                        Padding="0,2"
+                                        FontSize="11.5"
+                                        IsEnabled="{Binding CanNavigateForward}"
+                                        ToolTip="{Binding ForwardNavigationToolTip}"
+                                        Click="NavigateForward_Click" />
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                                 <Button Content="📝 외부 편집기로 열기" Style="{StaticResource DarkButtonStyle}" Padding="8,2" FontSize="11.5" Click="OpenExternalEditor_Click" />
                                 <Button Content="📁 폴더 열기" Style="{StaticResource DarkButtonStyle}" Padding="8,2" FontSize="11.5" Click="OpenFileFolder_Click" />
